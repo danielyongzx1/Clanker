@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Clanker",
+    "slug": "Clanker",
+    "version": "1.0.0",
+    "scheme": "clanker",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-secure-store",
+      "expo-image",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Clanker uses your photos so you can attach them to chats.",
+          "cameraPermission": "Clanker uses your camera so you can attach photos to chats.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

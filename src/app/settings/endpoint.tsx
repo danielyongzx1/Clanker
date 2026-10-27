@@ -1,0 +1,384 @@
+import Feather from '@expo/vector-icons/Feather';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type TextInputProps,
+} from 'react-native';
+import { getAdapter, PRESETS, PROVIDER_LABELS, type Endpoint, type ProviderType } from '@/lib/providers';
+import { apiKeys, uid } from '@/lib/storage';
+import { fonts, useTheme } from '@/lib/theme';
+import { useSettings } from '@/store/settings';
+
+const TYPES: ProviderType[] = ['openai', 'anthropic', 'ollama', 'gemini'];
+
+function parseHeaders(text: string) {
+  const headers: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const i = line.indexOf(':');
+    if (i > 0) headers[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return headers;
+}
+
+function Label({ children }: { children: ReactNode }) {
+  const { colors } = useTheme();
+  return <Text style={[styles.label, { color: colors.textSecondary }]}>{children}</Text>;
+}
+
+function Input(props: TextInputProps) {
+  const { colors } = useTheme();
+  return (
+    <TextInput
+      placeholderTextColor={colors.textTertiary}
+      autoCapitalize="none"
+      autoCorrect={false}
+      {...props}
+      style={[styles.input, { color: colors.text, backgroundColor: colors.surface }, props.style]}
+    />
+  );
+}
+
+function Chip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+  const { colors } = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        styles.chip,
+        { borderColor: selected ? colors.text : colors.border, backgroundColor: selected ? colors.surface : 'transparent' },
+      ]}
+    >
+      <Text style={{ color: colors.text, fontSize: 14, fontWeight: selected ? '600' : '400' }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+export default function EndpointScreen() {
+  const { colors } = useTheme();
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const existing = useSettings((s) => s.endpoints.find((e) => e.id === id));
+
+  const [name, setName] = useState(existing?.name ?? '');
+  const [type, setType] = useState<ProviderType>(existing?.type ?? 'openai');
+  const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? '');
+  const [apiKey, setApiKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [models, setModels] = useState<string[]>(existing?.models ?? []);
+  const [newModel, setNewModel] = useState('');
+  const [modelFilter, setModelFilter] = useState('');
+  const [headersText, setHeadersText] = useState(
+    Object.entries(existing?.headers ?? {})
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\n')
+  );
+  const [busy, setBusy] = useState<'fetch' | 'test' | null>(null);
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    if (existing) apiKeys.get(existing.id).then((k) => k && setApiKey(k));
+  }, [existing]);
+
+  const draft = (): Endpoint => ({
+    id: existing?.id ?? uid(),
+    name: name.trim() || PROVIDER_LABELS[type],
+    type,
+    baseUrl: baseUrl.trim(),
+    models,
+    headers: parseHeaders(headersText),
+  });
+
+  const applyPreset = (preset: (typeof PRESETS)[number]) => {
+    setType(preset.type);
+    setBaseUrl(preset.baseUrl);
+    setName(preset.name === 'Custom' ? '' : preset.name);
+    setModels([]);
+    setStatus(null);
+  };
+
+  const fetchModels = async () => {
+    if (!baseUrl.trim()) return setStatus({ ok: false, text: 'Enter a base URL first.' });
+    setBusy('fetch');
+    setStatus(null);
+    try {
+      const list = await getAdapter(type).listModels(draft(), apiKey.trim() || undefined);
+      setModels(list);
+      setStatus({ ok: true, text: `Found ${list.length} model${list.length === 1 ? '' : 's'}.` });
+    } catch (e) {
+      setStatus({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const testConnection = async () => {
+    if (!models.length) return setStatus({ ok: false, text: 'Add or fetch at least one model to test.' });
+    setBusy('test');
+    setStatus(null);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    let reply = '';
+    try {
+      await getAdapter(type).stream({
+        endpoint: draft(),
+        apiKey: apiKey.trim() || undefined,
+        model: models[0],
+        signal: controller.signal,
+        messages: [{ role: 'user', text: 'Reply with exactly one word: OK', images: [] }],
+        onToken: (t) => (reply += t),
+      });
+      setStatus({ ok: true, text: `${models[0]} replied: ${reply.trim().slice(0, 80) || '(empty)'}` });
+    } catch (e) {
+      const text = controller.signal.aborted ? 'Timed out after 30 seconds.' : e instanceof Error ? e.message : String(e);
+      setStatus({ ok: false, text });
+    } finally {
+      clearTimeout(timeout);
+      setBusy(null);
+    }
+  };
+
+  const addModel = () => {
+    const m = newModel.trim();
+    if (m && !models.includes(m)) setModels([...models, m]);
+    setNewModel('');
+  };
+
+  const save = async () => {
+    if (!baseUrl.trim()) return Alert.alert('Missing base URL', 'Enter the URL of the API.');
+    if (!models.length) return Alert.alert('No models', 'Fetch the model list or add a model name manually.');
+    const endpoint = draft();
+    await apiKeys.set(endpoint.id, apiKey.trim());
+    useSettings.getState().upsertEndpoint(endpoint);
+    router.back();
+  };
+
+  const remove = () =>
+    Alert.alert('Delete endpoint?', `${existing?.name} and its API key will be removed from this device.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          useSettings.getState().removeEndpoint(existing!.id);
+          router.back();
+        },
+      },
+    ]);
+
+  const visibleModels = useMemo(() => {
+    const q = modelFilter.trim().toLowerCase();
+    return q ? models.filter((m) => m.toLowerCase().includes(q)) : models;
+  }, [models, modelFilter]);
+
+  const keyPlaceholder = type === 'ollama' ? 'Optional' : type === 'openai' ? 'sk-… (optional for local servers)' : 'Required';
+
+  return (
+    <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: colors.background }}>
+      <Stack.Screen
+        options={{
+          title: existing ? 'Edit endpoint' : 'Add endpoint',
+          headerRight: () => (
+            <Pressable onPress={save} hitSlop={10}>
+              <Text style={{ color: colors.link, fontSize: 17, fontWeight: '600' }}>Save</Text>
+            </Pressable>
+          ),
+        }}
+      />
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {!existing && (
+          <>
+            <Label>Quick start</Label>
+            <View style={styles.chips}>
+              {PRESETS.map((p) => (
+                <Chip key={p.name} label={p.name} selected={p.name === name} onPress={() => applyPreset(p)} />
+              ))}
+            </View>
+          </>
+        )}
+
+        <Label>Name</Label>
+        <Input value={name} onChangeText={setName} placeholder="My endpoint" autoCapitalize="words" />
+
+        <Label>API format</Label>
+        <View style={styles.chips}>
+          {TYPES.map((t) => (
+            <Chip key={t} label={PROVIDER_LABELS[t]} selected={type === t} onPress={() => setType(t)} />
+          ))}
+        </View>
+
+        <Label>Base URL</Label>
+        <Input
+          value={baseUrl}
+          onChangeText={setBaseUrl}
+          placeholder={type === 'openai' ? 'https://api.example.com/v1' : 'https://…'}
+          keyboardType="url"
+        />
+        {(type === 'ollama' || baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) && (
+          <Text style={[styles.hint, { color: colors.textTertiary }]}>
+            On a phone, use your computer&apos;s LAN IP instead of localhost, and start Ollama with OLLAMA_HOST=0.0.0.0.
+          </Text>
+        )}
+
+        <Label>API key</Label>
+        <View>
+          <Input
+            value={apiKey}
+            onChangeText={setApiKey}
+            placeholder={keyPlaceholder}
+            secureTextEntry={!showKey}
+            style={{ paddingRight: 44 }}
+          />
+          <Pressable onPress={() => setShowKey(!showKey)} hitSlop={8} style={styles.eye}>
+            <Feather name={showKey ? 'eye-off' : 'eye'} size={18} color={colors.textTertiary} />
+          </Pressable>
+        </View>
+
+        <View style={styles.modelsHeader}>
+          <Label>Models ({models.length})</Label>
+          <Pressable onPress={fetchModels} disabled={!!busy} hitSlop={8} style={styles.inlineButton}>
+            {busy === 'fetch' ? (
+              <ActivityIndicator size="small" color={colors.link} />
+            ) : (
+              <Feather name="download-cloud" size={16} color={colors.link} />
+            )}
+            <Text style={{ color: colors.link, fontSize: 15, fontWeight: '500' }}>Fetch models</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.addRow}>
+          <Input
+            value={newModel}
+            onChangeText={setNewModel}
+            placeholder="Add model name manually"
+            onSubmitEditing={addModel}
+            returnKeyType="done"
+            style={{ flex: 1 }}
+          />
+          <Pressable onPress={addModel} style={[styles.addButton, { backgroundColor: colors.sendBg }]}>
+            <Feather name="plus" size={20} color={colors.sendFg} />
+          </Pressable>
+        </View>
+
+        {models.length > 10 && (
+          <Input value={modelFilter} onChangeText={setModelFilter} placeholder="Filter models" style={{ marginTop: 8 }} />
+        )}
+
+        {models.length > 0 && (
+          <View style={[styles.modelList, { backgroundColor: colors.surface }]}>
+            {visibleModels.slice(0, 200).map((m, i) => (
+              <View
+                key={m}
+                style={[styles.modelRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+              >
+                <Text numberOfLines={1} style={[styles.modelName, { color: colors.text }]}>
+                  {m}
+                </Text>
+                <Pressable onPress={() => setModels(models.filter((x) => x !== m))} hitSlop={8}>
+                  <Feather name="x" size={16} color={colors.textTertiary} />
+                </Pressable>
+              </View>
+            ))}
+            {visibleModels.length > 200 && (
+              <Text style={[styles.hint, { color: colors.textTertiary, padding: 12 }]}>
+                {visibleModels.length - 200} more. Use the filter to find them.
+              </Text>
+            )}
+          </View>
+        )}
+        {models.length > 10 && (
+          <Pressable
+            onPress={() =>
+              Alert.alert('Remove all models?', undefined, [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Remove all', style: 'destructive', onPress: () => setModels([]) },
+              ])
+            }
+            hitSlop={6}
+            style={{ alignSelf: 'flex-end', marginTop: 8 }}
+          >
+            <Text style={{ color: colors.textTertiary, fontSize: 14 }}>Remove all</Text>
+          </Pressable>
+        )}
+
+        <Label>Extra headers</Label>
+        <Input
+          value={headersText}
+          onChangeText={setHeadersText}
+          placeholder={'Header-Name: value\nOne per line (optional)'}
+          multiline
+          style={{ minHeight: 70, textAlignVertical: 'top', fontFamily: fonts.mono, fontSize: 14 }}
+        />
+
+        <Pressable
+          onPress={testConnection}
+          disabled={!!busy}
+          style={({ pressed }) => [styles.button, { borderColor: colors.border }, pressed && { opacity: 0.6 }]}
+        >
+          {busy === 'test' ? (
+            <ActivityIndicator size="small" color={colors.text} />
+          ) : (
+            <Feather name="zap" size={16} color={colors.text} />
+          )}
+          <Text style={{ color: colors.text, fontSize: 16, fontWeight: '500' }}>Test connection</Text>
+        </Pressable>
+
+        {status && (
+          <View style={[styles.status, { backgroundColor: status.ok ? colors.surface : colors.dangerBg }]}>
+            <Feather
+              name={status.ok ? 'check-circle' : 'alert-circle'}
+              size={16}
+              color={status.ok ? colors.text : colors.danger}
+            />
+            <Text selectable style={{ flex: 1, color: status.ok ? colors.text : colors.danger, fontSize: 14, lineHeight: 20 }}>
+              {status.text}
+            </Text>
+          </View>
+        )}
+
+        {existing && (
+          <Pressable onPress={remove} style={({ pressed }) => [styles.button, styles.delete, pressed && { opacity: 0.6 }]}>
+            <Feather name="trash-2" size={16} color={colors.danger} />
+            <Text style={{ color: colors.danger, fontSize: 16, fontWeight: '500' }}>Delete endpoint</Text>
+          </Pressable>
+        )}
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  content: { padding: 16, paddingBottom: 60 },
+  label: { fontSize: 13, fontWeight: '500', marginTop: 20, marginBottom: 8, marginLeft: 4 },
+  input: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16 },
+  hint: { fontSize: 13, lineHeight: 18, marginTop: 6, marginHorizontal: 4 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  eye: { position: 'absolute', right: 14, top: 0, bottom: 0, justifyContent: 'center' },
+  modelsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
+  inlineButton: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  addRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  addButton: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  modelList: { borderRadius: 12, marginTop: 8, overflow: 'hidden' },
+  modelRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12 },
+  modelName: { flex: 1, fontSize: 15, fontFamily: fonts.mono },
+  button: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 13,
+    marginTop: 28,
+  },
+  status: { flexDirection: 'row', gap: 10, borderRadius: 12, padding: 12, marginTop: 12 },
+  delete: { borderWidth: 0, marginTop: 16 },
+});
