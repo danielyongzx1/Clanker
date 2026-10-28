@@ -8,9 +8,12 @@ import { MessageBubble } from './MessageBubble';
 type Props = {
   messages: Message[];
   onRegenerate: (messageId: string) => void;
+  // Heights of the header and composer floating over the list, so content rests clear of them.
+  topInset: number;
+  bottomInset: number;
 };
 
-export function MessageList({ messages, onRegenerate }: Props) {
+export function MessageList({ messages, onRegenerate, topInset, bottomInset }: Props) {
   const { colors } = useTheme();
   const listRef = useRef<FlatList<Message>>(null);
   const [showJump, setShowJump] = useState(false);
@@ -32,7 +35,8 @@ export function MessageList({ messages, onRegenerate }: Props) {
         renderItem={({ item }) => (
           <MessageBubble message={item} isLast={item.id === lastAssistantId} onRegenerate={onRegenerate} />
         )}
-        contentContainerStyle={styles.content}
+        // Inverted flips the content, so its top padding shows at the bottom and vice versa.
+        contentContainerStyle={{ paddingTop: 12 + bottomInset, paddingBottom: 12 + topInset }}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         onScroll={onScroll}
@@ -41,7 +45,7 @@ export function MessageList({ messages, onRegenerate }: Props) {
       {showJump && (
         <Pressable
           onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
-          style={[styles.jump, { backgroundColor: colors.background, borderColor: colors.border }]}
+          style={[styles.jump, { bottom: 12 + bottomInset, backgroundColor: colors.background, borderColor: colors.border }]}
         >
           <Feather name="arrow-down" size={18} color={colors.text} />
         </Pressable>
@@ -52,10 +56,8 @@ export function MessageList({ messages, onRegenerate }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  content: { paddingVertical: 12 },
   jump: {
     position: 'absolute',
-    bottom: 12,
     alignSelf: 'center',
     width: 36,
     height: 36,

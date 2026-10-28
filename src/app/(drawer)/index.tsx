@@ -6,11 +6,11 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { scheduleOnRN } from 'react-native-worklets';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardAvoidingView, OverKeyboardView } from 'react-native-keyboard-controller';
-import { Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useShallow } from 'zustand/react/shallow';
 import { ChatHeader } from '@/components/ChatHeader';
 import { Composer } from '@/components/Composer';
+import { EdgeFade } from '@/components/EdgeFade';
 import { EffortSlider } from '@/components/EffortSlider';
 import { EmptyState } from '@/components/EmptyState';
 import { MessageList } from '@/components/MessageList';
@@ -27,10 +27,10 @@ import { useUI } from '@/store/ui';
 // screen bottom, with a fade of VEIL_FADE above it, so text behind the panel drops out.
 const VEIL_CAP = 26;
 const VEIL_FADE = 120;
-// Eased opacity ramp (0 → 1) for the veil gradients; a linear one shows a visible edge
-// where it meets the solid part.
-const VEIL_EASE = [0, 0.06, 0.2, 0.42, 0.66, 0.86, 1];
 const EFFORT_FADE = { duration: 160 };
+// How far the header and composer fades reach past their controls into the conversation.
+const HEADER_FADE = 16;
+const COMPOSER_FADE = 28;
 
 // Keeps the keyboard height so the over-keyboard effort panel can sit just above it.
 function useKeyboard() {
@@ -63,6 +63,12 @@ export default function ChatScreen() {
 
   const [draft, setDraft] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  // The conversation runs under the floating header and composer; these are their measured
+  // heights (fade included) so content can rest clear of them.
+  const [headerHeight, setHeaderHeight] = useState(insets.top + 60 + HEADER_FADE);
+  const [composerHeight, setComposerHeight] = useState(0);
+  const topInset = headerHeight - HEADER_FADE;
+  const bottomInset = Math.max(composerHeight - COMPOSER_FADE, 0);
   const effortOpen = useUI((s) => s.effortOpen);
   const setEffortOpen = useUI((s) => s.setEffortOpen);
   const showEffort = effortOpen && !!effort;
@@ -149,45 +155,71 @@ export default function ChatScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ChatHeader
-        title={active?.model ?? 'Clanker'}
-        onMenu={() => {
-          Keyboard.dismiss();
-          navigation.openDrawer();
-        }}
-        onTitle={() => setPickerOpen(true)}
-        onNewChat={currentId ? () => open(null) : undefined}
-      />
-
       {/* With KeyboardProvider mounted the Android window no longer resizes for the keyboard,
           so both platforms pad from the keyboard height. */}
       <KeyboardAvoidingView style={styles.container} behavior="padding">
-        {messages.length > 0 ? (
-          <MessageList messages={messages} onRegenerate={onRegenerate} />
-        ) : (
-          <EmptyState
-            hasEndpoint={hasEndpoint}
-            onSuggestion={setDraft}
-            onAddEndpoint={() => router.push('/settings/endpoint')}
-          />
-        )}
-        <View style={{ paddingBottom: bottomPad, paddingTop: 4 }}>
-          {/* Faded out rather than unmounted while the slider is up, so attached images survive,
-              and untouchable as a backstop in case the overlay window mounts a beat late. */}
-          <Animated.View style={composerStyle} pointerEvents={showEffort ? 'none' : 'auto'}>
-            <Composer
-              text={draft}
-              onChangeText={setDraft}
-              streaming={streaming}
-              onSend={send}
-              onStop={() => currentId && stopStreaming(currentId)}
-              keyboardVisible={keyboardVisible}
-              effort={effort ? { ...effort, onPress: () => setEffortOpen(true) } : undefined}
-              context={usage}
+        {/* An unpadded box, so the composer's absolute position isn't thrown off by the
+            avoiding view's keyboard padding. */}
+        <View style={styles.container}>
+          {messages.length > 0 ? (
+            <MessageList
+              messages={messages}
+              onRegenerate={onRegenerate}
+              topInset={topInset}
+              bottomInset={bottomInset}
             />
-          </Animated.View>
+          ) : (
+            <View style={[styles.container, { paddingTop: topInset, paddingBottom: bottomInset }]}>
+              <EmptyState
+                hasEndpoint={hasEndpoint}
+                onSuggestion={setDraft}
+                onAddEndpoint={() => router.push('/settings/endpoint')}
+              />
+            </View>
+          )}
+          {/* Floats over the bottom of the list; content scrolling under it fades out into the
+              background instead of being cut off at a hard edge. */}
+          <View
+            pointerEvents="box-none"
+            onLayout={(e) => setComposerHeight(e.nativeEvent.layout.height)}
+            style={[styles.composerArea, { paddingBottom: bottomPad }]}
+          >
+            <EdgeFade solid="bottom" style={StyleSheet.absoluteFill} />
+            {/* Faded out rather than unmounted while the slider is up, so attached images survive,
+                and untouchable as a backstop in case the overlay window mounts a beat late. */}
+            <Animated.View style={composerStyle} pointerEvents={showEffort ? 'none' : 'auto'}>
+              <Composer
+                text={draft}
+                onChangeText={setDraft}
+                streaming={streaming}
+                onSend={send}
+                onStop={() => currentId && stopStreaming(currentId)}
+                keyboardVisible={keyboardVisible}
+                effort={effort ? { ...effort, onPress: () => setEffortOpen(true) } : undefined}
+                context={usage}
+              />
+            </Animated.View>
+          </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Floats over the top of the list, fading what scrolls beneath it, as in ChatGPT. */}
+      <View
+        pointerEvents="box-none"
+        onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}
+        style={styles.headerArea}
+      >
+        <EdgeFade solid="top" style={StyleSheet.absoluteFill} />
+        <ChatHeader
+          title={active?.model ?? 'Clanker'}
+          onMenu={() => {
+            Keyboard.dismiss();
+            navigation.openDrawer();
+          }}
+          onTitle={() => setPickerOpen(true)}
+          onNewChat={currentId ? () => open(null) : undefined}
+        />
+      </View>
 
       {/* The layer floats above the keyboard window, so the keyboard keeps showing under the
           veil and stays untouched: every tap lands on this layer's scrim. */}
@@ -211,18 +243,7 @@ export default function ChatScreen() {
               style={[styles.effort, effortStyle]}
             >
               {/* Content fades out into solid background just above the label. */}
-              <View pointerEvents="none" style={styles.veilFade}>
-                <Svg width="100%" height="100%">
-                  <Defs>
-                    <LinearGradient id="effortVeil" x1="0" y1="0" x2="0" y2="1">
-                      {VEIL_EASE.map((o, i) => (
-                        <Stop key={i} offset={i / (VEIL_EASE.length - 1)} stopColor={colors.background} stopOpacity={o} />
-                      ))}
-                    </LinearGradient>
-                  </Defs>
-                  <Rect x="0" y="0" width="100%" height="100%" fill="url(#effortVeil)" />
-                </Svg>
-              </View>
+              <EdgeFade solid="bottom" style={styles.veilFade} />
               {/* Solid behind the label and slider; without a keyboard it runs flush to the
                   screen bottom. */}
               <View
@@ -241,20 +262,7 @@ export default function ChatScreen() {
               {/* Over the keyboard the veil keeps going as a gradient — solid just below the
                   slider, washing out toward the bottom of the screen so the keys emerge from
                   it, as in ChatGPT. */}
-              {keyboardVisible && (
-                <View pointerEvents="none" style={{ height: panelBottom }}>
-                  <Svg width="100%" height="100%">
-                    <Defs>
-                      <LinearGradient id="effortVeilDown" x1="0" y1="0" x2="0" y2="1">
-                        {VEIL_EASE.map((o, i) => (
-                          <Stop key={i} offset={1 - i / (VEIL_EASE.length - 1)} stopColor={colors.background} stopOpacity={o} />
-                        )).reverse()}
-                      </LinearGradient>
-                    </Defs>
-                    <Rect x="0" y="0" width="100%" height="100%" fill="url(#effortVeilDown)" />
-                  </Svg>
-                </View>
-              )}
+              {keyboardVisible && <EdgeFade solid="top" style={{ height: panelBottom }} />}
             </Animated.View>
           )}
         </GestureHandlerRootView>
@@ -272,5 +280,7 @@ const styles = StyleSheet.create({
   scrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   effort: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   veilFade: { height: VEIL_FADE },
+  headerArea: { position: 'absolute', top: 0, left: 0, right: 0, paddingBottom: HEADER_FADE },
+  composerArea: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: COMPOSER_FADE },
   panel: { paddingHorizontal: 28, paddingTop: VEIL_CAP },
 });

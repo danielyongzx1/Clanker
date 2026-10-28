@@ -16,7 +16,9 @@ export function ChatHeader({ title, onMenu, onTitle, onNewChat }: Props) {
   const circle = [styles.circle, { backgroundColor: colors.chrome, borderColor: colors.chromeBorder }];
 
   return (
-    <View style={[styles.header, { paddingTop: insets.top + 6, backgroundColor: colors.background }]}>
+    // Transparent and floating over the message list; the chat screen paints a fade behind it.
+    // Touches between the buttons fall through so the list still scrolls from there.
+    <View pointerEvents="box-none" style={[styles.header, { paddingTop: insets.top + 6 }]}>
       <Pressable
         onPress={onMenu}
         hitSlop={6}
@@ -31,7 +33,7 @@ export function ChatHeader({ title, onMenu, onTitle, onNewChat }: Props) {
       </Pressable>
 
       {/* Styled like ChatGPT's Chat/Work toggle; the highlighted segment is the active model. */}
-      <View style={styles.center}>
+      <View pointerEvents="box-none" style={styles.center}>
         <Pressable
           onPress={onTitle}
           accessibilityLabel="Choose model"
