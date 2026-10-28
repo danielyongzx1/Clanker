@@ -118,13 +118,16 @@ async function runCompletion(id: string) {
     reasoningBuffer = '';
   };
 
-  // Wall time of the thinking phase, recorded once when it ends.
+  // Wall time of the current stretch of thinking, recorded on its part when answer text or the
+  // end of the response follows it. Each response (and each stretch within one) is timed apart.
   let thinkingStartedAt = 0;
-  let thoughtMsSet = false;
   const markThoughtDone = () => {
-    if (!thinkingStartedAt || thoughtMsSet) return;
-    thoughtMsSet = true;
-    useChats.getState().updateMessage(id, replyId, { thoughtMs: Date.now() - thinkingStartedAt });
+    if (!thinkingStartedAt) return;
+    const ms = Date.now() - thinkingStartedAt;
+    thinkingStartedAt = 0;
+    // The part may still be in the buffer.
+    flush();
+    useChats.getState().finishThought(id, replyId, ms);
   };
 
   const tools = settings.tools ? availableTools() : undefined;

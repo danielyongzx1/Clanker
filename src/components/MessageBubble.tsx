@@ -59,26 +59,57 @@ function Images({ images, align }: { images: ImagePart[]; align: 'flex-end' | 'f
   );
 }
 
-type Segment = { kind: 'text'; text: string } | { kind: 'tool'; part: ToolPart };
+type Segment =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; part: ToolPart }
+  | { kind: 'thought'; text: string; ms?: number };
 
-/** Runs of text merged into one markdown block, with tool calls between them, in reply order. */
+/** Runs of text merged into one markdown block, with thoughts and tool calls between them, in reply order. */
 function segmentsOf(message: Message): Segment[] {
-  const out: Segment[] = [];
+  // Replies saved before thoughts were content parts keep theirs in one block at the top.
+  const out: Segment[] = message.reasoning ? [{ kind: 'thought', text: message.reasoning, ms: message.thoughtMs }] : [];
   for (const part of message.content) {
     const last = out[out.length - 1];
     if (part.type === 'text') {
       if (last?.kind === 'text') last.text += part.text;
       else out.push({ kind: 'text', text: part.text });
     } else if (part.type === 'tool') out.push({ kind: 'tool', part });
+    else if (part.type === 'thought') out.push({ kind: 'thought', text: part.text, ms: part.ms });
   }
   return out;
+}
+
+/** One stretch of the model's thinking: a "Thought for Ns" pill that shows or hides the text. */
+function Thoughts({ text, ms, live }: { text: string; ms?: number; live: boolean }) {
+  const { colors } = useTheme();
+  // Expanded while it streams; a tap pins the choice either way.
+  const [openOverride, setOpenOverride] = useState<boolean | null>(null);
+  const open = openOverride ?? live;
+  return (
+    <>
+      <ThinkingIndicator
+        thinking={live}
+        expanded={open}
+        toggleable
+        thoughtMs={ms}
+        onToggle={() => setOpenOverride(!open)}
+      />
+      {open && (
+        <ScrollView style={styles.thoughts} nestedScrollEnabled>
+          <View style={[styles.thoughtsInner, { borderLeftColor: colors.border }]}>
+            <Text selectable style={[styles.thoughtsText, { color: colors.textSecondary }]}>
+              {text}
+            </Text>
+          </View>
+        </ScrollView>
+      )}
+    </>
+  );
 }
 
 function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
-  // Expanded by default while thinking streams; a tap pins the choice either way.
-  const [openOverride, setOpenOverride] = useState<boolean | null>(null);
   const text = messageText(message);
   const images = message.content.filter((p): p is ImagePart => p.type === 'image');
   const files = message.content.filter((p): p is FilePart => p.type === 'file');
@@ -108,41 +139,24 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
 
   const streaming = message.status === 'streaming';
   const segments = segmentsOf(message);
-  const lastPart = message.content[message.content.length - 1];
-  // The pill pulses until the first answer token, and again while the model works out its next
-  // step after a round of tool calls; then it settles to a "Thought for Ns" row.
-  const thinking = streaming && (!text || (lastPart?.type === 'tool' && lastPart.status !== 'running'));
-  const hasReasoning = !!message.reasoning;
-  // Open while thoughts stream in, unless the user collapsed them; closed once done.
-  const thoughtsOpen = openOverride ?? (thinking && hasReasoning);
+  const lastSeg = segments[segments.length - 1];
+  // A bare pulsing pill while the model is working with nothing streaming yet: before its first
+  // token, and while it works out its next step after a round of tool calls. Streamed thoughts
+  // pulse in their own pill instead.
+  const waiting = streaming && (!lastSeg || (lastSeg.kind === 'tool' && lastSeg.part.status !== 'running'));
 
   return (
     <View style={styles.assistantRow}>
-      {(thinking || hasReasoning) && (
-        <ThinkingIndicator
-          thinking={thinking}
-          expanded={thoughtsOpen}
-          toggleable={hasReasoning}
-          thoughtMs={message.thoughtMs}
-          onToggle={() => setOpenOverride(!thoughtsOpen)}
-        />
-      )}
-      {thoughtsOpen && hasReasoning && (
-        <ScrollView style={styles.thoughts} nestedScrollEnabled>
-          <View style={[styles.thoughtsInner, { borderLeftColor: colors.border }]}>
-            <Text selectable style={[styles.thoughtsText, { color: colors.textSecondary }]}>
-              {message.reasoning}
-            </Text>
-          </View>
-        </ScrollView>
-      )}
       {segments.map((seg, i) =>
         seg.kind === 'tool' ? (
           <ToolCall key={seg.part.id} part={seg.part} />
+        ) : seg.kind === 'thought' ? (
+          <Thoughts key={`r${i}`} text={seg.text} ms={seg.ms} live={streaming && seg === lastSeg} />
         ) : (
           !!seg.text.trim() && <Markdown key={`t${i}`} value={seg.text} />
         )
       )}
+      {waiting && <ThinkingIndicator thinking expanded={false} toggleable={false} onToggle={() => {}} />}
 
       {message.status === 'error' && (
         <View style={[styles.error, { backgroundColor: colors.dangerBg, borderColor: colors.danger }]}>

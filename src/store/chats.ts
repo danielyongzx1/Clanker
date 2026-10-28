@@ -14,9 +14,9 @@ export interface Message {
   status: MessageStatus;
   error?: string;
   model?: string;
-  /** Streamed thinking/reasoning text, when the provider surfaces it. Not sent back to the model. */
+  /** Thinking from replies saved before thoughts became `thought` content parts. */
   reasoning?: string;
-  /** How long the model spent thinking before answering, in ms; set only when reasoning streamed. */
+  /** How long the legacy `reasoning` took, in ms. */
   thoughtMs?: number;
 }
 
@@ -64,7 +64,10 @@ interface ChatsState {
   addMessage: (id: string, message: Omit<Message, 'id' | 'createdAt'>) => string;
   updateMessage: (id: string, messageId: string, patch: Partial<Message>) => void;
   appendText: (id: string, messageId: string, text: string) => void;
+  /** Extends the thought part at the end of the reply, or starts a new one after other parts. */
   appendReasoning: (id: string, messageId: string, text: string) => void;
+  /** Records how long the reply's latest thought part took. */
+  finishThought: (id: string, messageId: string, ms: number) => void;
   appendParts: (id: string, messageId: string, parts: ContentPart[]) => void;
   patchTool: (id: string, messageId: string, toolId: string, patch: Partial<ToolPart>) => void;
   setCompressions: (id: string, blocks: CompressionBlock[]) => void;
@@ -143,7 +146,18 @@ export const useChats = create<ChatsState>()(
               : { content: [...m.content, { type: 'text', text }] };
           }),
         appendReasoning: (id, messageId, text) =>
-          patchMessage(id, messageId, (m) => ({ reasoning: (m.reasoning ?? '') + text })),
+          patchMessage(id, messageId, (m) => {
+            const last = m.content[m.content.length - 1];
+            return last?.type === 'thought'
+              ? { content: [...m.content.slice(0, -1), { ...last, text: last.text + text }] }
+              : { content: [...m.content, { type: 'thought', text }] };
+          }),
+        finishThought: (id, messageId, ms) =>
+          patchMessage(id, messageId, (m) => {
+            const index = m.content.findLastIndex((p) => p.type === 'thought');
+            if (index < 0) return {};
+            return { content: m.content.map((p, i) => (i === index ? { ...p, ms } : p)) };
+          }),
         appendParts: (id, messageId, parts) => patchMessage(id, messageId, (m) => ({ content: [...m.content, ...parts] })),
         patchTool: (id, messageId, toolId, patch) =>
           patchMessage(id, messageId, (m) => ({

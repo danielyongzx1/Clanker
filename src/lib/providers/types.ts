@@ -63,7 +63,15 @@ export type ToolPart = {
   thinking?: unknown[];
 };
 
-export type ContentPart = { type: 'text'; text: string } | ImagePart | FilePart | ToolPart;
+/** Streamed thinking/reasoning from one stretch of a model response. Shown only, never sent back. */
+export type ThoughtPart = {
+  type: 'thought';
+  text: string;
+  /** How long this stretch of thinking took, in ms; set once the model moves on. */
+  ms?: number;
+};
+
+export type ContentPart = { type: 'text'; text: string } | ImagePart | FilePart | ToolPart | ThoughtPart;
 
 export type AttachmentPart = ImagePart | FilePart;
 
