@@ -3,6 +3,8 @@ import type { Endpoint, ProviderAdapter, ToolCall, WireMessage } from './types';
 
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 
+const CACHE = { type: 'ephemeral' };
+
 // Thinking budgets for models that only take `type: "enabled"` (4.5-era and older).
 const EXTENDED_BUDGETS: Record<string, number> = { low: 2048, medium: 8192, high: 16384, xhigh: 24576, max: 30000 };
 
@@ -80,18 +82,26 @@ export const anthropic: ProviderAdapter = {
   },
 
   async stream({ endpoint, apiKey, model, messages, system, effort, tools, signal, onToken, onReasoning }) {
+    // Anthropic only caches up to explicit breakpoints. History is append-only, so mark the end of
+    // this request and the end of the previous one (the user turn before), so each request reads
+    // what the last one wrote; the system prompt gets one too, shared by every chat.
+    const wire = messages.map(toAnthropic);
+    for (const m of wire.filter((m) => m.role === 'user').slice(-2)) {
+      const last = m.content.length - 1;
+      if (last >= 0) m.content[last] = { ...m.content[last], cache_control: CACHE };
+    }
     const body = {
       model,
       stream: true,
       // Without thinking, 8192 is the cap; thinking counts toward max_tokens, and every
       // model that takes effort allows at least 32K.
       max_tokens: 8192,
-      ...(system ? { system } : {}),
+      ...(system ? { system: [{ type: 'text', text: system, cache_control: CACHE }] } : {}),
       ...(effort ? { output_config: { effort }, ...thinkingBody(endpoint, model, effort) } : {}),
       ...(tools?.length
         ? { tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })) }
         : {}),
-      messages: messages.map(toAnthropic),
+      messages: wire,
     };
     const res = await request(joinUrl(endpoint.baseUrl, 'v1/messages'), {
       headers: { Accept: 'text/event-stream', ...headers(endpoint, apiKey) },
@@ -145,7 +155,7 @@ export const anthropic: ProviderAdapter = {
   },
 };
 
-function toAnthropic(m: WireMessage) {
+function toAnthropic(m: WireMessage): { role: string; content: Record<string, unknown>[] } {
   if (m.role === 'tool') {
     return {
       role: 'user',
@@ -166,7 +176,7 @@ function toAnthropic(m: WireMessage) {
   return {
     role: m.role,
     content: [
-      ...(m.toolCalls?.length ? (m.thinking ?? []) : []),
+      ...((m.toolCalls?.length ? (m.thinking ?? []) : []) as Record<string, unknown>[]),
       ...m.images.map((img) => ({
         type: 'image',
         source: { type: 'base64', media_type: img.mimeType, data: img.base64 },

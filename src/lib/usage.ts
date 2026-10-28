@@ -21,12 +21,12 @@ export function useContextUsage(conversationId: string | null, enabled: boolean)
 
   const replyId = conversation?.messages.find((m) => m.status === 'streaming')?.id;
   const count = conversation?.messages.length ?? 0;
-  // The system prompt lists the workspace and jobs, which takes a file walk; refresh it when a
-  // message starts or a reply ends, not on every streamed token.
+  // Refreshed when a message starts or a reply ends (the web and shell tools can come and go),
+  // not on every streamed token.
   const overhead = useMemo(() => {
     if (!enabled || !budget || !withTools) return { system: 0, tools: 0 };
     return {
-      system: tokensOf(agentSystemPrompt({ conversationId: conversationId ?? '', replyId: replyId ?? '', budget })),
+      system: tokensOf(agentSystemPrompt()),
       tools: tokensOf(JSON.stringify(availableTools())),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

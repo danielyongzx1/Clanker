@@ -1,4 +1,4 @@
-import { messageText, useChats, type CompressionBlock, type Conversation, type Message } from '@/store/chats';
+import { messageText, useChats, type CompressionBlock, type ContextNote, type Conversation, type Message } from '@/store/chats';
 import type { ProviderType, ToolPart, WireImage, WireMessage } from './providers';
 import { describeCall } from './tools/describe';
 
@@ -135,6 +135,8 @@ type WireOptions = {
   withTools: boolean;
   /** Tags units with their refs so the model can compress them. */
   tagged: boolean;
+  /** Context notes by unit key, sent after their unit. */
+  notes?: Record<string, ContextNote>;
   readBase64: (file: string) => Promise<string | null>;
 };
 
@@ -170,6 +172,8 @@ async function userToWire(unit: Unit, opts: WireOptions): Promise<WireMessage> {
     }
   }
   if (opts.tagged && unit.ref) text = `[${refName(unit.ref)} · ~${formatTokens(unit.tokens)} tokens]\n${text}`;
+  const note = opts.notes?.[unit.key];
+  if (note) text += `\n\n${note.text}`;
   return { role: 'user', text, images, ...(files.length ? { files } : {}) };
 }
 
@@ -180,6 +184,7 @@ async function stepToWire(unit: Unit, opts: WireOptions): Promise<WireMessage[]>
     return [{ role: 'assistant', text: [text, ...summary].filter(Boolean).join('\n\n'), images: [] }];
   }
   const tag = opts.tagged && unit.ref ? `[${refName(unit.ref)} · ~${formatTokens(unit.tokens)} tokens]\n` : '';
+  const note = opts.notes?.[unit.key];
   const results = await Promise.all(
     calls.map(async (c, i) => {
       const images: WireImage[] = [];
@@ -190,7 +195,7 @@ async function stepToWire(unit: Unit, opts: WireOptions): Promise<WireMessage[]>
       return {
         callId: c.id,
         name: c.name,
-        output: (i === 0 ? tag : '') + (c.output ?? ''),
+        output: (i === 0 ? tag : '') + (c.output ?? '') + (note && i === calls.length - 1 ? `\n\n${note.text}` : ''),
         isError: c.status === 'error',
         images,
       };

@@ -29,6 +29,15 @@ export type FilePart = {
   size?: number;
 };
 
+/** A web page a tool found or read, shown with the reply as a source. */
+export type Source = {
+  url: string;
+  title?: string;
+  /** A short excerpt, for the sources list. */
+  snippet?: string;
+  date?: string;
+};
+
 /** A tool call the model made inside an assistant reply, with its result once it ran. */
 export type ToolPart = {
   type: 'tool';
@@ -42,6 +51,8 @@ export type ToolPart = {
   images?: ImagePart[];
   /** Workspace files the call created or changed, shown as chips the user can open. */
   files?: string[];
+  /** Web pages the call searched up or read. */
+  sources?: Source[];
   durationMs?: number;
   /**
    * Set when the call started a background job. Shown in the UI only: the model saw the
@@ -71,7 +82,14 @@ export type ThoughtPart = {
   ms?: number;
 };
 
-export type ContentPart = { type: 'text'; text: string } | ImagePart | FilePart | ToolPart | ThoughtPart;
+export type TextPart = {
+  type: 'text';
+  text: string;
+  /** When a reply's text part started streaming, in ms since the epoch. */
+  at?: number;
+};
+
+export type ContentPart = TextPart | ImagePart | FilePart | ToolPart | ThoughtPart;
 
 export type AttachmentPart = ImagePart | FilePart;
 

@@ -267,8 +267,10 @@ export async function renderPage(url: string, signal: AbortSignal) {
       signal: t.signal,
     });
     const json: any = await res.json();
+    const meta = json.data?.metadata ?? {};
     return {
-      title: String(json.data?.metadata?.title ?? ''),
+      title: String(meta.title ?? ''),
+      image: String(meta.ogImage ?? meta['og:image'] ?? ''),
       text: stripDataImages(String(json.data?.markdown ?? '')).trim(),
       status: Number(json.data?.metadata?.statusCode) || 200,
     };
@@ -409,9 +411,17 @@ function mainContent(html: string) {
   return body.replace(PAGE_CHROME, '');
 }
 
+/** The page's preview image (og:image or twitter:image), as an absolute URL. */
+function previewImage(html: string, url: string) {
+  const tag = html.match(/<meta\b[^>]*\b(?:property|name)\s*=\s*["'](?:og:image(?::url)?|twitter:image)["'][^>]*>/i)?.[0];
+  const src = tag ? attr(tag, 'content').trim() : '';
+  return src && !src.startsWith('data:') ? resolveUrl(src, url) : '';
+}
+
 /** Converts an HTML page to compact markdown, keeping headings, links, lists, tables and code. */
 export function htmlToMarkdown(html: string, url: string) {
   const title = plain(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? '');
+  const image = previewImage(html, url);
   let s = mainContent(html.replace(/\u0000/g, '').replace(/<!--[\s\S]*?-->/g, '').replace(DROP, ''));
 
   // Preformatted text keeps its whitespace, so it is set aside before whitespace is collapsed.
@@ -461,5 +471,5 @@ export function htmlToMarkdown(html: string, url: string) {
     .replace(/\u0000(\d+)\u0000/g, (_, i: string) => kept[Number(i)])
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-  return { title, text };
+  return { title, text, image };
 }

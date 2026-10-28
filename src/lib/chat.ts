@@ -6,7 +6,7 @@ import { getAdapter, ProviderError, type AttachmentPart, type Endpoint, type Too
 import { apiKeys, uid } from './storage';
 import { availableTools, executeTool } from './tools';
 import { markObserved } from './tools/observe';
-import { agentSystemPrompt } from './tools/prompt';
+import { agentSystemPrompt, writeContextNote } from './tools/prompt';
 
 const controllers = new Map<string, AbortController>();
 
@@ -148,6 +148,7 @@ async function runCompletion(id: string) {
       endpointType: endpoint.type,
       withTools: !!tools,
       tagged: !!tools,
+      notes: tools ? current.notes : undefined,
       readBase64,
     });
   };
@@ -157,6 +158,9 @@ async function runCompletion(id: string) {
     apiKey = (await apiKeys.get(endpoint.id)) ?? undefined;
     for (let step = 1; ; step++) {
       autoCompress(id, replyId, budget * AUTO_TRIGGER, budget * AUTO_TARGET);
+      // What changes between steps (time, workspace, jobs) goes after the newest history item and
+      // stays there, so the system prompt and earlier history are a stable, cacheable prefix.
+      if (tools) writeContextNote({ conversationId: id, replyId, budget });
       let streamed = false;
       let result;
       for (let attempt = 0; ; attempt++) {
@@ -166,8 +170,7 @@ async function runCompletion(id: string) {
             apiKey,
             model: conversation.model,
             effort: effort?.level,
-            // The system prompt lists the workspace and background jobs, which change between steps.
-            system: tools ? agentSystemPrompt({ conversationId: id, replyId, budget }) : undefined,
+            system: tools ? agentSystemPrompt() : undefined,
             tools,
             messages: await buildMessages(),
             signal: controller.signal,
@@ -235,6 +238,7 @@ async function runCompletion(id: string) {
           durationMs: Date.now() - started,
           ...(outcome.images?.length ? { images: outcome.images } : {}),
           ...(outcome.files?.length ? { files: outcome.files } : {}),
+          ...(outcome.sources?.length ? { sources: outcome.sources } : {}),
         });
       }
       if (controller.signal.aborted) throw new Error('Stopped');

@@ -5,7 +5,7 @@ import { ClankerShell } from '../../../modules/clanker-shell';
 import { importAsset } from '../attachments';
 import { compress, contextStatus, decompress, searchContext } from '../context';
 import { describeJob, getJob, jobsOf, killJob, startJob, waitForJob } from '../jobs';
-import type { ImagePart, ToolCall, ToolSpec } from '../providers';
+import type { ImagePart, Source, ToolCall, ToolSpec } from '../providers';
 import { releaseWorker, runScript, type ScriptResult } from '../runtime';
 import { uid } from '../storage';
 import {
@@ -31,6 +31,8 @@ export type ToolOutcome = {
   images?: ImagePart[];
   /** Workspace files the call created or changed. */
   files?: string[];
+  /** Web pages the call searched up or read, shown to the user as sources. */
+  sources?: Source[];
 };
 
 export type ToolContext = {
@@ -647,6 +649,13 @@ const TEXT_TYPE = /^text\/|[+/](json|xml|javascript|ecmascript|yaml|csv|markdown
 const MIN_PAGE_CHARS = 500;
 // Statuses sites answer bots with.
 const BLOCKED_STATUS = [401, 403, 429, 503];
+// Sources keep this much of a snippet; they are only shown in the sources list.
+const SOURCE_SNIPPET_CHARS = 200;
+
+function sourceSnippet(text: string) {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > SOURCE_SNIPPET_CHARS ? `${flat.slice(0, SOURCE_SNIPPET_CHARS).trimEnd()}…` : flat;
+}
 
 const webSearch: Tool = {
   name: 'web_search',
@@ -671,7 +680,15 @@ const webSearch: Tool = {
       (r, i) =>
         `${i + 1}. ${r.title}\n   ${r.url}${r.date ? ` · ${r.date}` : ''}${r.snippet ? `\n   ${r.snippet.replace(/\n/g, '\n   ')}` : ''}`
     );
-    return { output: clip(note + list.join('\n\n')) };
+    return {
+      output: clip(note + list.join('\n\n')),
+      sources: results.map((r) => ({
+        url: r.url,
+        title: r.title,
+        ...(r.snippet ? { snippet: sourceSnippet(r.snippet) } : {}),
+        ...(r.date ? { date: r.date } : {}),
+      })),
+    };
   },
 };
 
@@ -720,17 +737,19 @@ const webFetch: Tool = {
 
     let text = new TextDecoder().decode(res.bytes);
     let title = '';
+    let image = '';
     let status = res.status;
     let via = '';
     const html = /html/.test(res.type) || (!res.type && /^\s*<(!doctype html|html)/i.test(text));
     if (html && !input.raw) {
-      ({ title, text } = htmlToMarkdown(text, res.url));
+      ({ title, text, image } = htmlToMarkdown(text, res.url));
       // Little text usually means the page is built by JavaScript, and these statuses a bot wall: a real browser gets past both.
       if (text.length < MIN_PAGE_CHARS || BLOCKED_STATUS.includes(res.status)) {
         try {
           const rendered = await renderPage(res.url, signal);
           if (rendered.text.length > text.length) {
             ({ title, text, status } = rendered);
+            image ||= rendered.image;
             via = '[Loaded through Firecrawl, since the page needs JavaScript or turned away a direct request.]';
           }
         } catch (e) {
@@ -746,12 +765,17 @@ const webFetch: Tool = {
     const header = [
       title && `# ${title}`,
       `URL: ${res.url}`,
+      image && `Preview image: ${image}`,
       !ok && `HTTP ${status}`,
       via,
       (start > 0 || end < text.length) &&
         `[Characters ${start}-${end} of ${text.length}.${end < text.length ? ` Pass start=${end} to read on.` : ''}]`,
     ].filter(Boolean);
-    return { output: `${header.join('\n')}\n\n${page || '[no text]'}`, isError: !ok };
+    return {
+      output: `${header.join('\n')}\n\n${page || '[no text]'}`,
+      isError: !ok,
+      ...(ok ? { sources: [{ url: res.url, ...(title ? { title } : {}), snippet: sourceSnippet(text.slice(0, 600)) }] } : {}),
+    };
   },
 };
 

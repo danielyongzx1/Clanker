@@ -2,13 +2,15 @@ import Feather from '@expo/vector-icons/Feather';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
-import { memo, useState } from 'react';
+import { memo, useMemo, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { attachmentUri } from '@/lib/attachments';
-import type { FilePart, ImagePart, ToolPart } from '@/lib/providers';
+import type { ContentPart, FilePart, ImagePart, ToolPart } from '@/lib/providers';
+import { sitesOf, sourcesOf } from '@/lib/sources';
 import { useTheme } from '@/lib/theme';
 import { messageText, type Message } from '@/store/chats';
 import { Markdown } from './Markdown';
+import { SiteChips, SourcesButton } from './Sources';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolCall } from './ToolCall';
 
@@ -60,7 +62,7 @@ function Images({ images, align }: { images: ImagePart[]; align: 'flex-end' | 'f
 }
 
 type Segment =
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; text: string; at?: number }
   | { kind: 'tool'; part: ToolPart }
   | { kind: 'thought'; text: string; ms?: number };
 
@@ -72,11 +74,81 @@ function segmentsOf(message: Message): Segment[] {
     const last = out[out.length - 1];
     if (part.type === 'text') {
       if (last?.kind === 'text') last.text += part.text;
-      else out.push({ kind: 'text', text: part.text });
+      else out.push({ kind: 'text', text: part.text, at: part.at });
     } else if (part.type === 'tool') out.push({ kind: 'tool', part });
     else if (part.type === 'thought') out.push({ kind: 'thought', text: part.text, ms: part.ms });
   }
   return out;
+}
+
+// While a reply streams, text after its last tool call may be the answer or a note before the next
+// call; there is no telling until the response ends. Notes are a sentence or two, so the work folds
+// away once the text runs past this, and otherwise when the reply finishes.
+const ANSWER_CHARS = 240;
+
+/**
+ * Splits a reply that used tools into the work (thoughts, tool calls and notes, up to the last
+ * thought or call) and the answer after it. Replies without tool calls aren't split.
+ */
+function splitWork(segments: Segment[]) {
+  const end = segments.findLastIndex((s) => s.kind !== 'text');
+  const work = segments.slice(0, end + 1);
+  if (!work.some((s) => s.kind === 'tool')) return null;
+  const answer = segments.slice(end + 1) as Extract<Segment, { kind: 'text' }>[];
+  return { work, answer, text: answer.map((s) => s.text).join('').trim(), at: answer[0]?.at };
+}
+
+function duration(ms: number) {
+  const s = Math.max(1, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+/** The work behind an answer under a "Worked for Ns" header, open while it happens and folded once the answer comes. */
+function Work({
+  segments,
+  folded,
+  live,
+  ms,
+  render,
+  content,
+}: {
+  segments: Segment[];
+  /** Whether the work is done and the answer is on its way, which folds it unless the user opened it. */
+  folded: boolean;
+  live: boolean;
+  ms: number;
+  render: (seg: Segment, i: number) => ReactNode;
+  content: ContentPart[];
+}) {
+  const { colors } = useTheme();
+  const [openOverride, setOpenOverride] = useState<boolean | null>(null);
+  const open = openOverride ?? !folded;
+  const { sites, searched } = useMemo(() => sitesOf(content), [content]);
+  const label = live && !folded ? 'Working…' : `Worked for ${duration(ms)}`;
+  return (
+    <>
+      <Pressable
+        onPress={() => setOpenOverride(!open)}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}, ${open ? 'hide' : 'show'} steps`}
+        style={({ pressed }) => [styles.workHeader, pressed && { opacity: 0.6 }]}
+      >
+        <Text style={[styles.workLabel, { color: colors.textSecondary }]}>{label}</Text>
+        <Feather
+          name="chevron-down"
+          size={14}
+          color={colors.textSecondary}
+          style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
+        />
+      </Pressable>
+      {/* Under the header rather than after the steps: a note the model writes before its next
+          call shows after the steps and joins them when the call lands, which would push the
+          sites down on every round. */}
+      <SiteChips sites={sites} searched={searched} />
+      {open && segments.map(render)}
+    </>
+  );
 }
 
 /** One stretch of the model's thinking: a "Thought for Ns" pill that shows or hides the text. */
@@ -144,17 +216,43 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
   // token, and while it works out its next step after a round of tool calls. Streamed thoughts
   // pulse in their own pill instead.
   const waiting = streaming && (!lastSeg || (lastSeg.kind === 'tool' && lastSeg.part.status !== 'running'));
+  const split = splitWork(segments);
+  const answered = !!split?.text && (!streaming || split.text.length > ANSWER_CHARS);
+  // From the start of the reply to the start of its answer; replies saved without that time add up their steps.
+  const workedMs =
+    split && answered && split.at
+      ? split.at - message.createdAt
+      : (split?.work ?? []).reduce(
+          (ms, s) => ms + (s.kind === 'tool' ? (s.part.durationMs ?? 0) : s.kind === 'thought' ? (s.ms ?? 0) : 0),
+          0
+        );
+  const sources = message.status === 'done' ? sourcesOf(message.content) : [];
+
+  const render = (seg: Segment, i: number) =>
+    seg.kind === 'tool' ? (
+      <ToolCall key={seg.part.id} part={seg.part} />
+    ) : seg.kind === 'thought' ? (
+      <Thoughts key={`r${i}`} text={seg.text} ms={seg.ms} live={streaming && seg === lastSeg} />
+    ) : (
+      !!seg.text.trim() && <Markdown key={`t${i}`} value={seg.text} live={streaming && seg === lastSeg} />
+    );
 
   return (
     <View style={styles.assistantRow}>
-      {segments.map((seg, i) =>
-        seg.kind === 'tool' ? (
-          <ToolCall key={seg.part.id} part={seg.part} />
-        ) : seg.kind === 'thought' ? (
-          <Thoughts key={`r${i}`} text={seg.text} ms={seg.ms} live={streaming && seg === lastSeg} />
-        ) : (
-          !!seg.text.trim() && <Markdown key={`t${i}`} value={seg.text} />
-        )
+      {split ? (
+        <>
+          <Work
+            segments={split.work}
+            folded={answered}
+            live={streaming}
+            ms={workedMs}
+            render={render}
+            content={message.content}
+          />
+          {split.answer.map((seg, i) => render(seg, split.work.length + i))}
+        </>
+      ) : (
+        segments.map(render)
       )}
       {waiting && <ThinkingIndicator thinking expanded={false} toggleable={false} onToggle={() => {}} />}
 
@@ -189,6 +287,11 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
               {message.model}
             </Text>
           )}
+          {!!sources.length && (
+            <View style={styles.sources}>
+              <SourcesButton sources={sources} />
+            </View>
+          )}
         </View>
       )}
     </View>
@@ -220,6 +323,9 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2, marginLeft: -6 },
   action: { padding: 6 },
   model: { fontSize: 12, marginLeft: 6, flexShrink: 1 },
+  sources: { marginLeft: 'auto' },
+  workHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, marginLeft: 2, alignSelf: 'flex-start' },
+  workLabel: { fontSize: 15, fontWeight: '500' },
   error: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 10, marginTop: 4 },
   retry: {
     flexDirection: 'row',

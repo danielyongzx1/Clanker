@@ -36,6 +36,16 @@ export interface CompressionBlock {
   children?: CompressionBlock[];
 }
 
+/**
+ * The volatile state (time, history size, workspace, jobs) sent after a history unit when it was
+ * the latest one. Kept and resent as it was, so earlier history never changes and prompts cache.
+ */
+export interface ContextNote {
+  text: string;
+  /** The workspace listing, when the note shows it (only when it changed since the last one). */
+  workspace?: string;
+}
+
 export interface Conversation {
   id: string;
   title: string;
@@ -53,6 +63,8 @@ export interface Conversation {
    * write_file and edit_file refuse files that are missing here or changed since.
    */
   observed?: Record<string, string>;
+  /** Context notes by history unit key (see lib/context). */
+  notes?: Record<string, ContextNote>;
 }
 
 interface ChatsState {
@@ -71,6 +83,7 @@ interface ChatsState {
   appendParts: (id: string, messageId: string, parts: ContentPart[]) => void;
   patchTool: (id: string, messageId: string, toolId: string, patch: Partial<ToolPart>) => void;
   setCompressions: (id: string, blocks: CompressionBlock[]) => void;
+  setNote: (id: string, key: string, note: ContextNote) => void;
   /** Records file signatures as seen by the model; null forgets a path. */
   observe: (id: string, entries: Record<string, string | null>) => void;
   /** Removes the message with `messageId` and everything after it. */
@@ -142,8 +155,8 @@ export const useChats = create<ChatsState>()(
           patchMessage(id, messageId, (m) => {
             const last = m.content[m.content.length - 1];
             return last?.type === 'text'
-              ? { content: [...m.content.slice(0, -1), { type: 'text', text: last.text + text }] }
-              : { content: [...m.content, { type: 'text', text }] };
+              ? { content: [...m.content.slice(0, -1), { ...last, text: last.text + text }] }
+              : { content: [...m.content, { type: 'text', text, at: Date.now() }] };
           }),
         appendReasoning: (id, messageId, text) =>
           patchMessage(id, messageId, (m) => {
@@ -164,6 +177,7 @@ export const useChats = create<ChatsState>()(
             content: m.content.map((p) => (p.type === 'tool' && p.id === toolId ? { ...p, ...patch } : p)),
           })),
         setCompressions: (id, compressions) => patchConversation(id, () => ({ compressions })),
+        setNote: (id, key, note) => patchConversation(id, (c) => ({ notes: { ...c.notes, [key]: note } })),
         observe: (id, entries) =>
           patchConversation(id, (c) => {
             const observed = { ...c.observed };
