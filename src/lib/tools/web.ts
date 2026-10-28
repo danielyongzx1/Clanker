@@ -5,22 +5,41 @@ import { apiKeys } from '../storage';
 import { formatSize } from '../workspace';
 import { decodeEntities } from './documents';
 
-export const SEARCH_PROVIDERS: Record<SearchProvider, { label: string; needsKey: boolean; hint: string }> = {
+export const SEARCH_PROVIDERS: Record<SearchProvider, { label: string; key: 'none' | 'optional' | 'required'; hint: string }> = {
+  firecrawl: {
+    label: 'Firecrawl',
+    key: 'optional',
+    hint:
+      'Works without a key up to a daily limit per IP address, which phones on mobile data often share. ' +
+      'A free key from firecrawl.dev gives you your own quota, also used to render pages that need JavaScript.',
+  },
   duckduckgo: {
     label: 'DuckDuckGo',
-    needsKey: false,
-    hint: 'No key needed. DuckDuckGo may turn away searches made in quick succession; set up another provider if that happens often.',
+    key: 'none',
+    hint: 'No key needed. DuckDuckGo may turn away searches made in quick succession.',
   },
-  brave: { label: 'Brave', needsKey: true, hint: 'Get a key at api-dashboard.search.brave.com. The free plan covers light use.' },
-  tavily: { label: 'Tavily', needsKey: true, hint: 'Get a key at app.tavily.com. Tavily is built for agents, with longer snippets.' },
+  exa: {
+    label: 'Exa',
+    key: 'required',
+    hint: 'Get a key at dashboard.exa.ai ($10 of free credit each month). Results come with the passages relevant to the query.',
+  },
+  brave: { label: 'Brave', key: 'required', hint: 'Get a key at api-dashboard.search.brave.com. The free plan covers light use.' },
+  tavily: { label: 'Tavily', key: 'required', hint: 'Get a key at app.tavily.com. Tavily is built for agents, with longer snippets.' },
   searxng: {
     label: 'SearXNG',
-    needsKey: false,
+    key: 'none',
     hint: 'Your own SearXNG instance. Enable the json format under search.formats in its settings.yml.',
   },
 };
 
+/** Providers tried, in this order, when the chosen one fails: the ones the user set up first, then the keyless ones. */
+const FALLBACK_ORDER: SearchProvider[] = ['exa', 'tavily', 'brave', 'searxng', 'firecrawl', 'duckduckgo'];
+
 export const searchKeyId = (provider: SearchProvider) => `search-${provider}`;
+
+const FIRECRAWL = 'https://api.firecrawl.dev/v2';
+// Search providers that return page content get it cut to this many characters per result.
+const SNIPPET_CHARS = 1200;
 
 export type SearchResult = { title: string; url: string; snippet: string; date?: string };
 
@@ -29,6 +48,22 @@ const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 
 const plain = (html: string) => decodeEntities(html.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+
+const stripDataImages = (md: string) => md.replace(/!\[[^\]]*\]\(data:[^)]*\)/g, '');
+
+/** Page markdown cut down to a snippet: no images or link targets, no blank lines, at most `max` characters. */
+function excerpt(md: string, max = SNIPPET_CHARS) {
+  const text = md
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\\\n/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .trim();
+  if (text.length <= max) return text;
+  const cut = text.lastIndexOf(' ', max);
+  return `${text.slice(0, cut > max * 0.8 ? cut : max)} …`;
+}
 
 /** `signal`, also aborted after `ms`. */
 export function withTimeout(signal: AbortSignal, ms: number) {
@@ -71,12 +106,36 @@ async function duckduckgo(query: string, count: number, signal: AbortSignal): Pr
     results.push({ title: plain(a[1]), url, snippet: plain(snippet) });
     if (results.length >= count) break;
   }
-  if (!results.length && /anomaly/i.test(html)) {
-    throw new Error(
-      'DuckDuckGo turned the search away as automated. Try again in a minute, or set up Brave, Tavily or SearXNG in Settings → Web search.'
-    );
-  }
+  if (!results.length && /anomaly/i.test(html)) throw new Error('DuckDuckGo turned the search away as automated.');
   return results;
+}
+
+const firecrawlHeaders = (key: string | null): Record<string, string> => (key ? { Authorization: `Bearer ${key}` } : {});
+
+async function firecrawl(query: string, count: number, key: string | null, signal: AbortSignal): Promise<SearchResult[]> {
+  const res = await request(`${FIRECRAWL}/search`, { headers: firecrawlHeaders(key), body: { query, limit: count }, signal });
+  const json: any = await res.json();
+  // Keyless results sometimes carry the whole page as markdown in `description`.
+  return (json.data?.web ?? []).map((r: any) => ({
+    title: r.title || r.url,
+    url: r.url,
+    snippet: excerpt(String(r.markdown ?? r.description ?? '')),
+  }));
+}
+
+async function exa(query: string, count: number, key: string, signal: AbortSignal): Promise<SearchResult[]> {
+  const res = await request('https://api.exa.ai/search', {
+    headers: { 'x-api-key': key },
+    body: { query, numResults: count, type: 'auto', contents: { highlights: { maxCharacters: SNIPPET_CHARS } } },
+    signal,
+  });
+  const json: any = await res.json();
+  return (json.results ?? []).map((r: any) => ({
+    title: r.title || r.url,
+    url: r.url,
+    snippet: excerpt((r.highlights ?? []).join(' … ') || String(r.summary ?? '')),
+    date: typeof r.publishedDate === 'string' ? r.publishedDate.slice(0, 10) : undefined,
+  }));
 }
 
 async function brave(query: string, count: number, key: string, signal: AbortSignal): Promise<SearchResult[]> {
@@ -108,8 +167,7 @@ async function tavily(query: string, count: number, key: string, signal: AbortSi
   }));
 }
 
-async function searxng(query: string, count: number, base: string | undefined, signal: AbortSignal): Promise<SearchResult[]> {
-  if (!base?.trim()) throw new Error('No SearXNG URL is set. Add one in Settings → Web search.');
+async function searxng(query: string, count: number, base: string, signal: AbortSignal): Promise<SearchResult[]> {
   let res;
   try {
     res = await request(joinUrl(base.trim(), `search?q=${encodeURIComponent(query)}&format=json`), {
@@ -131,30 +189,91 @@ async function searxng(query: string, count: number, base: string | undefined, s
   }));
 }
 
-/** Runs `query` through the configured search provider. */
-export async function searchWeb(
+async function searchWith(
+  provider: SearchProvider,
   query: string,
   count: number,
-  signal: AbortSignal,
-  config: SearchConfig = useSettings.getState().search
-): Promise<SearchResult[]> {
-  const { label, needsKey } = SEARCH_PROVIDERS[config.provider];
-  const key = needsKey ? await apiKeys.get(searchKeyId(config.provider)) : null;
-  if (needsKey && !key) throw new Error(`No ${label} API key is set. Add one in Settings → Web search.`);
-  const t = withTimeout(signal, 30_000);
+  key: string | null,
+  config: SearchConfig,
+  signal: AbortSignal
+) {
+  const t = withTimeout(signal, 20_000);
   try {
-    switch (config.provider) {
+    switch (provider) {
+      case 'firecrawl':
+        return await firecrawl(query, count, key, t.signal);
+      case 'exa':
+        return await exa(query, count, key!, t.signal);
       case 'brave':
         return await brave(query, count, key!, t.signal);
       case 'tavily':
         return await tavily(query, count, key!, t.signal);
       case 'searxng':
-        return await searxng(query, count, config.url, t.signal);
+        return await searxng(query, count, config.url!.trim(), t.signal);
       default:
         return await duckduckgo(query, count, t.signal);
     }
   } catch (e) {
-    if (t.timedOut()) throw new Error(`${label} didn't answer within 30 seconds.`);
+    if (t.timedOut()) throw new Error("didn't answer within 20 seconds.");
+    throw e;
+  } finally {
+    t.done();
+  }
+}
+
+/**
+ * Runs `query` through the chosen search provider. When it fails and `fallback` is on, tries the
+ * other providers that are set up, in FALLBACK_ORDER; `failures` says what failed on the way.
+ */
+export async function searchWeb(
+  query: string,
+  count: number,
+  signal: AbortSignal,
+  { config = useSettings.getState().search, fallback = true }: { config?: SearchConfig; fallback?: boolean } = {}
+): Promise<{ results: SearchResult[]; provider: SearchProvider; failures: string[] }> {
+  const order = fallback ? [config.provider, ...FALLBACK_ORDER.filter((p) => p !== config.provider)] : [config.provider];
+  const failures: string[] = [];
+  for (const provider of order) {
+    const { label, key: keyUse } = SEARCH_PROVIDERS[provider];
+    const key = keyUse === 'none' ? null : await apiKeys.get(searchKeyId(provider));
+    const missing =
+      keyUse === 'required' && !key ? 'no API key is set' : provider === 'searxng' && !config.url?.trim() ? 'no URL is set' : null;
+    if (missing) {
+      // Providers the user hasn't set up are skipped quietly, unless they are the chosen one.
+      if (provider === config.provider) failures.push(`${label}: ${missing} (Settings → Web search).`);
+      continue;
+    }
+    try {
+      return { results: await searchWith(provider, query, count, key, config, signal), provider, failures };
+    } catch (e) {
+      if (signal.aborted) throw e;
+      failures.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  throw new Error(`Web search failed.\n${failures.join('\n')}`);
+}
+
+/**
+ * Fetches `url` through Firecrawl, which loads it in a real browser: for pages built by JavaScript
+ * and sites that turn away direct requests. Keyless unless the user set a Firecrawl key.
+ */
+export async function renderPage(url: string, signal: AbortSignal) {
+  const key = await apiKeys.get(searchKeyId('firecrawl'));
+  const t = withTimeout(signal, 90_000);
+  try {
+    const res = await request(`${FIRECRAWL}/scrape`, {
+      headers: firecrawlHeaders(key),
+      body: { url, formats: ['markdown'], onlyMainContent: true },
+      signal: t.signal,
+    });
+    const json: any = await res.json();
+    return {
+      title: String(json.data?.metadata?.title ?? ''),
+      text: stripDataImages(String(json.data?.markdown ?? '')).trim(),
+      status: Number(json.data?.metadata?.statusCode) || 200,
+    };
+  } catch (e) {
+    if (t.timedOut()) throw new Error("Firecrawl didn't finish loading the page within 90 seconds.");
     throw e;
   } finally {
     t.done();

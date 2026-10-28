@@ -23,7 +23,7 @@ import {
 import { describeCall } from './describe';
 import { extractZipDocument, ZIP_DOCUMENT_EXT } from './documents';
 import { forgetObserved, isObserved, markObserved, requireObserved } from './observe';
-import { download, htmlToMarkdown, searchWeb } from './web';
+import { download, htmlToMarkdown, renderPage, SEARCH_PROVIDERS, searchWeb } from './web';
 
 export type ToolOutcome = {
   output: string;
@@ -643,11 +643,15 @@ const jobKill: Tool = {
 const WEB_PAGE_CHARS = 20_000;
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 const TEXT_TYPE = /^text\/|[+/](json|xml|javascript|ecmascript|yaml|csv|markdown)$/;
+// A converted page shorter than this is probably built by JavaScript.
+const MIN_PAGE_CHARS = 500;
+// Statuses sites answer bots with.
+const BLOCKED_STATUS = [401, 403, 429, 503];
 
 const webSearch: Tool = {
   name: 'web_search',
   description:
-    'Search the web. Returns titles, URLs and snippets; open the promising results with web_fetch before relying on their details. ' +
+    'Search the web. Returns titles, URLs and snippets or page excerpts; open the promising results with web_fetch when you need more than the excerpt. ' +
     'Use it for current events, prices, documentation, niche facts and anything you are unsure of or that may have changed since your training.',
   parameters: {
     type: 'object',
@@ -660,15 +664,14 @@ const webSearch: Tool = {
   async run(input, { signal }) {
     const query = str(input.query, 'query');
     const count = Math.min(20, Math.max(1, Number(input.count) || 8));
-    const results = await searchWeb(query, count, signal);
-    if (!results.length) return { output: `No results for “${query}”.` };
-    return {
-      output: clip(
-        results
-          .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}${r.date ? ` · ${r.date}` : ''}${r.snippet ? `\n   ${r.snippet}` : ''}`)
-          .join('\n\n')
-      ),
-    };
+    const { results, provider, failures } = await searchWeb(query, count, signal);
+    const note = failures.length ? `[${failures.join(' ')} Results from ${SEARCH_PROVIDERS[provider].label}.]\n\n` : '';
+    if (!results.length) return { output: `${note}No results for “${query}”.` };
+    const list = results.map(
+      (r, i) =>
+        `${i + 1}. ${r.title}\n   ${r.url}${r.date ? ` · ${r.date}` : ''}${r.snippet ? `\n   ${r.snippet.replace(/\n/g, '\n   ')}` : ''}`
+    );
+    return { output: clip(note + list.join('\n\n')) };
   },
 };
 
@@ -676,6 +679,7 @@ const webFetch: Tool = {
   name: 'web_fetch',
   description:
     'Fetch a URL (http or https). Web pages come back as markdown with their links; long ones come in parts, so pass start to read on. ' +
+    'Pages that need JavaScript or turn away direct requests are loaded through a browser service automatically. ' +
     'Files that are not text (PDFs, images, Office documents, archives, ...) are saved to the workspace under downloads/, to open with read_file or a script. ' +
     'Pass save_as to save any response, text included, to a workspace path instead of reading it.',
   parameters: {
@@ -716,19 +720,38 @@ const webFetch: Tool = {
 
     let text = new TextDecoder().decode(res.bytes);
     let title = '';
+    let status = res.status;
+    let via = '';
     const html = /html/.test(res.type) || (!res.type && /^\s*<(!doctype html|html)/i.test(text));
-    if (html && !input.raw) ({ title, text } = htmlToMarkdown(text, res.url));
+    if (html && !input.raw) {
+      ({ title, text } = htmlToMarkdown(text, res.url));
+      // Little text usually means the page is built by JavaScript, and these statuses a bot wall: a real browser gets past both.
+      if (text.length < MIN_PAGE_CHARS || BLOCKED_STATUS.includes(res.status)) {
+        try {
+          const rendered = await renderPage(res.url, signal);
+          if (rendered.text.length > text.length) {
+            ({ title, text, status } = rendered);
+            via = '[Loaded through Firecrawl, since the page needs JavaScript or turned away a direct request.]';
+          }
+        } catch (e) {
+          if (signal.aborted) throw e;
+          via = `[The page may need JavaScript, but loading it through Firecrawl failed: ${e instanceof Error ? e.message : e}]`;
+        }
+      }
+    }
+    const ok = status >= 200 && status < 400;
     const start = Math.max(0, Number(input.start) || 0);
     const page = text.slice(start, start + WEB_PAGE_CHARS);
     const end = start + page.length;
     const header = [
       title && `# ${title}`,
       `URL: ${res.url}`,
-      !res.ok && `HTTP ${res.status}`,
+      !ok && `HTTP ${status}`,
+      via,
       (start > 0 || end < text.length) &&
         `[Characters ${start}-${end} of ${text.length}.${end < text.length ? ` Pass start=${end} to read on.` : ''}]`,
     ].filter(Boolean);
-    return { output: `${header.join('\n')}\n\n${page || '[no text]'}`, isError: !res.ok };
+    return { output: `${header.join('\n')}\n\n${page || '[no text]'}`, isError: !ok };
   },
 };
 

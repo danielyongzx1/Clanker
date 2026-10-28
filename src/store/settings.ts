@@ -7,7 +7,7 @@ export type ThemePreference = 'system' | 'light' | 'dark';
 
 export type ModelRef = { endpointId: string; model: string };
 
-export type SearchProvider = 'duckduckgo' | 'brave' | 'tavily' | 'searxng';
+export type SearchProvider = 'firecrawl' | 'duckduckgo' | 'exa' | 'brave' | 'tavily' | 'searxng';
 
 /** Where web_search sends queries. Keys live in SecureStore under `search-<provider>`. */
 export type SearchConfig = { provider: SearchProvider; /** SearXNG instance URL. */ url?: string };
@@ -53,7 +53,7 @@ export const useSettings = create<SettingsState>()(
       tools: true,
       contextUsage: false,
       web: true,
-      search: { provider: 'duckduckgo' },
+      search: { provider: 'firecrawl' },
       upsertEndpoint: (endpoint) => {
         const exists = get().endpoints.some((e) => e.id === endpoint.id);
         const endpoints = exists

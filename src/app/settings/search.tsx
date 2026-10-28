@@ -24,13 +24,13 @@ export default function SearchScreen() {
   const test = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (!info.needsKey) return;
+    if (info.key === 'none') return;
     let current = true;
     apiKeys.get(searchKeyId(provider)).then((k) => current && k && setApiKey(k));
     return () => {
       current = false;
     };
-  }, [provider, info.needsKey]);
+  }, [provider, info.key]);
 
   useEffect(() => () => test.current?.abort(), []);
 
@@ -54,7 +54,7 @@ export default function SearchScreen() {
     setBusy(true);
     setStatus(null);
     try {
-      const results = await searchWeb('weather today', 3, controller.signal, search);
+      const { results } = await searchWeb('weather today', 3, controller.signal, { config: search, fallback: false });
       setStatus(
         results.length
           ? { ok: true, text: `Search works. Top result: ${results[0].title}\n${results[0].url}` }
@@ -78,14 +78,14 @@ export default function SearchScreen() {
         </View>
         <Text style={[styles.hint, { color: colors.textTertiary }]}>{info.hint}</Text>
 
-        {info.needsKey && (
+        {info.key !== 'none' && (
           <>
             <Label>API key</Label>
             <View>
               <Input
                 value={apiKey}
                 onChangeText={changeKey}
-                placeholder={`${info.label} API key`}
+                placeholder={`${info.label} API key${info.key === 'optional' ? ' (optional)' : ''}`}
                 secureTextEntry={!showKey}
                 style={{ paddingRight: 44 }}
               />
@@ -131,8 +131,9 @@ export default function SearchScreen() {
         )}
 
         <Text style={[styles.hint, { color: colors.textTertiary, marginTop: 20 }]}>
-          Pages are fetched directly from this phone whatever the provider, and files the model downloads are saved to the
-          workspace under downloads/.
+          When a search fails, the other providers you have set up are tried, then Firecrawl and DuckDuckGo. Pages are
+          fetched directly from this phone; only those that need JavaScript or turn away direct requests are loaded through
+          Firecrawl. Files the model downloads are saved to the workspace under downloads/.
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
