@@ -14,6 +14,10 @@ export interface Message {
   status: MessageStatus;
   error?: string;
   model?: string;
+  /** Streamed thinking/reasoning text, when the provider surfaces it. Not sent back to the model. */
+  reasoning?: string;
+  /** How long the model spent thinking before answering, in ms; set only when reasoning streamed. */
+  thoughtMs?: number;
 }
 
 export interface Conversation {
@@ -37,6 +41,7 @@ interface ChatsState {
   addMessage: (id: string, message: Omit<Message, 'id' | 'createdAt'>) => string;
   updateMessage: (id: string, messageId: string, patch: Partial<Message>) => void;
   appendText: (id: string, messageId: string, text: string) => void;
+  appendReasoning: (id: string, messageId: string, text: string) => void;
   /** Removes the message with `messageId` and everything after it. */
   truncateFrom: (id: string, messageId: string) => void;
 }
@@ -101,6 +106,8 @@ export const useChats = create<ChatsState>()(
               ? { content: [...m.content.slice(0, -1), { type: 'text', text: last.text + text }] }
               : { content: [...m.content, { type: 'text', text }] };
           }),
+        appendReasoning: (id, messageId, text) =>
+          patchMessage(id, messageId, (m) => ({ reasoning: (m.reasoning ?? '') + text })),
         truncateFrom: (id, messageId) =>
           patchConversation(id, (c) => {
             const index = c.messages.findIndex((m) => m.id === messageId);

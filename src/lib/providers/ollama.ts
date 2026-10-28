@@ -29,7 +29,7 @@ export const ollama: ProviderAdapter = {
     return { models };
   },
 
-  async stream({ endpoint, apiKey, model, messages, system, effort, signal, onToken }) {
+  async stream({ endpoint, apiKey, model, messages, system, effort, signal, onToken, onReasoning }) {
     const body = {
       model,
       stream: true,
@@ -53,6 +53,7 @@ export const ollama: ProviderAdapter = {
       if (!line.trim()) continue;
       const json = JSON.parse(line);
       if (json.error) throw new Error(json.error);
+      if (json.message?.thinking) onReasoning?.(json.message.thinking);
       if (json.message?.content) onToken(json.message.content);
       if (json.done) break;
     }

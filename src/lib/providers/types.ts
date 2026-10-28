@@ -44,6 +44,8 @@ export interface StreamOptions {
   effort?: string;
   signal: AbortSignal;
   onToken: (text: string) => void;
+  /** Streams the model's reasoning/thinking output, when the provider exposes it. */
+  onReasoning?: (text: string) => void;
 }
 
 /**

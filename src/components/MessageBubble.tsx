@@ -3,13 +3,13 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { memo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { attachmentUri } from '@/lib/attachments';
 import type { ImagePart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 import { messageText, type Message } from '@/store/chats';
 import { Markdown } from './Markdown';
-import { TypingIndicator } from './TypingIndicator';
+import { ThinkingIndicator } from './ThinkingIndicator';
 
 type Props = {
   message: Message;
@@ -41,6 +41,8 @@ function Images({ images, align }: { images: ImagePart[]; align: 'flex-end' | 'f
 function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
+  // Expanded by default while thinking streams; a tap pins the choice either way.
+  const [openOverride, setOpenOverride] = useState<boolean | null>(null);
   const text = messageText(message);
   const images = message.content.filter((p): p is ImagePart => p.type === 'image');
 
@@ -67,9 +69,33 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
   }
 
   const streaming = message.status === 'streaming';
+  // The pill pulses until the first answer token; then it settles to a "Thought for Ns" row.
+  const thinking = streaming && !text;
+  const hasReasoning = !!message.reasoning;
+  // Open while thoughts stream in, unless the user collapsed them; closed once done.
+  const thoughtsOpen = openOverride ?? (thinking && hasReasoning);
+
   return (
     <View style={styles.assistantRow}>
-      {streaming && !text ? <TypingIndicator /> : !!text && <Markdown value={text} />}
+      {(thinking || hasReasoning) && (
+        <ThinkingIndicator
+          thinking={thinking}
+          expanded={thoughtsOpen}
+          toggleable={hasReasoning}
+          thoughtMs={message.thoughtMs}
+          onToggle={() => setOpenOverride(!thoughtsOpen)}
+        />
+      )}
+      {thoughtsOpen && hasReasoning && (
+        <ScrollView style={styles.thoughts} nestedScrollEnabled>
+          <View style={[styles.thoughtsInner, { borderLeftColor: colors.border }]}>
+            <Text selectable style={[styles.thoughtsText, { color: colors.textSecondary }]}>
+              {message.reasoning}
+            </Text>
+          </View>
+        </ScrollView>
+      )}
+      {!!text && <Markdown value={text} />}
 
       {message.status === 'error' && (
         <View style={[styles.error, { backgroundColor: colors.dangerBg, borderColor: colors.danger }]}>
@@ -115,7 +141,10 @@ const styles = StyleSheet.create({
   userBubble: { maxWidth: '82%', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10 },
   userText: { fontSize: 16, lineHeight: 23 },
   images: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, maxWidth: '82%' },
-  assistantRow: { paddingHorizontal: 16, marginVertical: 6 },
+  assistantRow: { paddingHorizontal: 16, marginVertical: 6, gap: 2 },
+  thoughts: { maxHeight: 260, marginVertical: 4 },
+  thoughtsInner: { borderLeftWidth: 3, paddingLeft: 12, paddingRight: 4 },
+  thoughtsText: { fontSize: 14, lineHeight: 21 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2, marginLeft: -6 },
   action: { padding: 6 },
   model: { fontSize: 12, marginLeft: 6, flexShrink: 1 },

@@ -12,8 +12,10 @@ type GeminiModel = { name: string; supportedGenerationMethods?: string[]; thinki
 const THINKING_BUDGETS: Record<string, number> = { none: 0, minimal: 512, low: 1024, medium: 8192, high: 24576 };
 
 function thinkingConfig(model: string, effort: string) {
-  if (!/gemini-2\./.test(model)) return { thinkingLevel: effort };
-  return { thinkingBudget: THINKING_BUDGETS[effort] ?? -1 };
+  const levels = !/gemini-2\./.test(model) ? { thinkingLevel: effort } : { thinkingBudget: THINKING_BUDGETS[effort] ?? -1 };
+  // Thought summaries are withheld unless asked for; without this the panel would stay empty.
+  // REST takes camelCase here, unlike the snake_case inline_data elsewhere in this body.
+  return { ...levels, includeThoughts: true };
 }
 
 export const gemini: ProviderAdapter = {
@@ -28,7 +30,7 @@ export const gemini: ProviderAdapter = {
     return { models };
   },
 
-  async stream({ endpoint, apiKey, model, messages, system, effort, signal, onToken }) {
+  async stream({ endpoint, apiKey, model, messages, system, effort, signal, onToken, onReasoning }) {
     const body = {
       ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
       ...(effort ? { generationConfig: { thinkingConfig: thinkingConfig(model, effort) } } : {}),
@@ -50,8 +52,10 @@ export const gemini: ProviderAdapter = {
       const json = JSON.parse(data);
       if (json.error) throw new Error(json.error.message ?? 'Stream error');
       for (const part of json.candidates?.[0]?.content?.parts ?? []) {
-        // Skip thought summaries from thinking models.
-        if (part.text && !part.thought) onToken(part.text);
+        if (!part.text) continue;
+        // Thought summaries from thinking models stream with `thought: true`.
+        if (part.thought) onReasoning?.(part.text);
+        else onToken(part.text);
       }
     }
   },

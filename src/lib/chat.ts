@@ -83,11 +83,24 @@ async function runCompletion(id: string) {
   const controller = new AbortController();
   controllers.set(id, controller);
   let buffer = '';
+  let reasoningBuffer = '';
   let timer: ReturnType<typeof setTimeout> | null = null;
   const flush = () => {
     timer = null;
-    if (buffer) useChats.getState().appendText(id, replyId, buffer);
+    const chats = useChats.getState();
+    if (reasoningBuffer) chats.appendReasoning(id, replyId, reasoningBuffer);
+    if (buffer) chats.appendText(id, replyId, buffer);
     buffer = '';
+    reasoningBuffer = '';
+  };
+
+  // Wall time of the thinking phase, recorded once when it ends.
+  let thinkingStartedAt = 0;
+  let thoughtMsSet = false;
+  const markThoughtDone = () => {
+    if (!thinkingStartedAt || thoughtMsSet) return;
+    thoughtMsSet = true;
+    useChats.getState().updateMessage(id, replyId, { thoughtMs: Date.now() - thinkingStartedAt });
   };
 
   let apiKey: string | undefined;
@@ -101,14 +114,22 @@ async function runCompletion(id: string) {
       messages: await Promise.all(history.map(toWire)),
       signal: controller.signal,
       onToken: (token) => {
+        markThoughtDone();
         buffer += token;
+        timer ??= setTimeout(flush, FLUSH_MS);
+      },
+      onReasoning: (token) => {
+        thinkingStartedAt ||= Date.now();
+        reasoningBuffer += token;
         timer ??= setTimeout(flush, FLUSH_MS);
       },
     });
     flush();
+    markThoughtDone();
     useChats.getState().updateMessage(id, replyId, { status: 'done' });
   } catch (e) {
     flush();
+    markThoughtDone();
     if (controller.signal.aborted) {
       useChats.getState().updateMessage(id, replyId, { status: 'done' });
     } else {

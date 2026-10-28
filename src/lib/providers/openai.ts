@@ -27,7 +27,8 @@ function detectEffortParam(endpoint: Endpoint, models: OpenAIModel[]): EffortPar
 function effortBody(endpoint: Endpoint, effort: string) {
   switch (endpoint.effortParam ?? detectEffortParam(endpoint, [])) {
     case 'reasoning':
-      return { reasoning: { effort } };
+      // `enabled` matters for models that only reason on request; effort picks the depth.
+      return { reasoning: { effort, enabled: true, exclude: false } };
     case 'chat_template_kwargs':
       // Hybrid models (Qwen3, GLM, ...) toggle thinking; gpt-oss's template reads a level.
       return {
@@ -57,7 +58,7 @@ export const openai: ProviderAdapter = {
     return { models, effortParam };
   },
 
-  async stream({ endpoint, apiKey, model, messages, system, effort, signal, onToken }) {
+  async stream({ endpoint, apiKey, model, messages, system, effort, signal, onToken, onReasoning }) {
     const body = {
       model,
       stream: true,
@@ -89,7 +90,12 @@ export const openai: ProviderAdapter = {
       if (data === '[DONE]') break;
       const json = JSON.parse(data);
       if (json.error) throw new Error(json.error.message ?? String(json.error));
-      const text = json.choices?.[0]?.delta?.content;
+      const delta = json.choices?.[0]?.delta;
+      // Reasoning arrives as `reasoning_content` on DeepSeek/llama.cpp-style servers and as
+      // `reasoning` on OpenRouter.
+      const thought = delta?.reasoning_content ?? delta?.reasoning;
+      if (typeof thought === 'string' && thought) onReasoning?.(thought);
+      const text = delta?.content;
       if (text) onToken(text);
     }
   },

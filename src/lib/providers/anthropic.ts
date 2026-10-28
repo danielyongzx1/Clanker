@@ -3,6 +3,44 @@ import type { Endpoint, ProviderAdapter } from './types';
 
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 
+// Thinking budgets for models that only take `type: "enabled"` (4.5-era and older).
+const EXTENDED_BUDGETS: Record<string, number> = { low: 2048, medium: 8192, high: 16384, xhigh: 24576, max: 30000 };
+
+/** Reads "claude-opus-4-6", "claude-3-5-sonnet" etc. as [4, 6] / [3, 5]; date suffixes → minor 0. */
+function modelVersion(model: string): [number, number] | null {
+  const m = model.toLowerCase().match(/claude-(?:(?:opus|sonnet|haiku)-)?(\d+)(?:[.-](\d+))?/);
+  if (!m) return null;
+  const minor = m[2] ? parseInt(m[2]) : 0;
+  return [parseInt(m[1]), minor > 20 ? 0 : minor];
+}
+
+/** Models before Opus 4.6 don't take adaptive thinking; they need `type: "enabled"` + a budget. */
+function isLegacyExtended(model: string) {
+  const v = modelVersion(model);
+  return !!v && (v[0] < 4 || (v[0] === 4 && v[1] <= 5));
+}
+
+/**
+ * Effort alone doesn't switch thinking on: on 4.5-era and older models it needs
+ * `thinking: {type: "enabled", budget_tokens}`, on 4.6–4.8 `thinking: {type: "adaptive"}`,
+ * and on thinking-by-default models the summary display defaults to "omitted". Ask for
+ * readable thinking whenever an effort level is set.
+ */
+function thinkingBody(endpoint: Endpoint, model: string, effort?: string) {
+  if (!effort) return {};
+  if (isLegacyExtended(model)) {
+    const budget = EXTENDED_BUDGETS[effort] ?? 8192;
+    return { thinking: { type: 'enabled', budget_tokens: budget }, max_tokens: budget + 8192 };
+  }
+  // `display` is an Anthropic-first field; some proxies 400 on unknown fields, so only
+  // send it to api.anthropic.com. Adaptive still enables thinking on the rest.
+  const direct = /(^|\/\/|\.)(?:api\.)?anthropic\.com/i.test(endpoint.baseUrl);
+  return {
+    thinking: direct ? { type: 'adaptive', display: 'summarized' } : { type: 'adaptive' },
+    max_tokens: 32000,
+  };
+}
+
 type AnthropicModel = {
   id: string;
   capabilities?: { effort?: { supported?: boolean } & Record<string, { supported?: boolean } | boolean | undefined> };
@@ -34,14 +72,15 @@ export const anthropic: ProviderAdapter = {
     return { models: ((json.data ?? []) as AnthropicModel[]).map((m) => ({ id: m.id, efforts: effortsOf(m) })) };
   },
 
-  async stream({ endpoint, apiKey, model, messages, system, effort, signal, onToken }) {
+  async stream({ endpoint, apiKey, model, messages, system, effort, signal, onToken, onReasoning }) {
     const body = {
       model,
-      // Thinking counts toward max_tokens, and every model that takes effort allows at least 64K.
-      max_tokens: effort ? 32000 : 8192,
       stream: true,
+      // Without thinking, 8192 is the cap; thinking counts toward max_tokens, and every
+      // model that takes effort allows at least 32K.
+      max_tokens: 8192,
       ...(system ? { system } : {}),
-      ...(effort ? { output_config: { effort } } : {}),
+      ...(effort ? { output_config: { effort }, ...thinkingBody(endpoint, model, effort) } : {}),
       messages: messages.map((m) => ({
         role: m.role,
         content: [
@@ -62,8 +101,17 @@ export const anthropic: ProviderAdapter = {
     for await (const data of readSSE(res)) {
       const event = JSON.parse(data);
       if (event.type === 'error') throw new Error(event.error?.message ?? 'Stream error');
-      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-        onToken(event.delta.text);
+      if (event.type === 'content_block_delta') {
+        if (event.delta?.type === 'text_delta') onToken(event.delta.text);
+        // signature_delta and redacted_thinking carry nothing readable; skip them.
+        // Summarized thinking streams as summary_delta instead of thinking_delta.
+        if (event.delta?.type === 'thinking_delta' && event.delta.thinking) {
+          onReasoning?.(event.delta.thinking);
+        }
+        if (event.delta?.type === 'summary_delta') {
+          const summary = event.delta.summary ?? event.delta.text;
+          if (summary) onReasoning?.(summary);
+        }
       }
       if (event.type === 'message_stop') break;
     }
