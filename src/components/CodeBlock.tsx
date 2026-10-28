@@ -3,8 +3,9 @@ import * as Clipboard from 'expo-clipboard';
 import type { ElementContent, Root } from 'hast';
 import { common, createLowlight } from 'lowlight';
 import { memo, useMemo, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { fonts, useTheme } from '@/lib/theme';
+import { HorizontalScroll } from './HorizontalScroll';
 
 const lowlight = createLowlight(common);
 
@@ -122,11 +123,11 @@ function CodeBlockInner({ code, language }: { code: string; language?: string })
           <Text style={[styles.copyText, { color: colors.textSecondary }]}>{copied ? 'Copied' : 'Copy'}</Text>
         </Pressable>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.body}>
+      <HorizontalScroll contentContainerStyle={styles.body}>
         <Text selectable style={[styles.code, { color: palette.base }]}>
           {highlighted}
         </Text>
-      </ScrollView>
+      </HorizontalScroll>
     </View>
   );
 }

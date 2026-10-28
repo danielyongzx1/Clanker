@@ -3,10 +3,15 @@ import { View, type TextStyle, type ViewStyle } from 'react-native';
 import { Renderer, useMarkdown, type MarkedStyles } from 'react-native-marked';
 import { fonts, useTheme, type Colors } from '@/lib/theme';
 import { CodeBlock } from './CodeBlock';
+import { MarkdownTable } from './MarkdownTable';
 
 class ChatRenderer extends Renderer {
   code(text: string, language?: string, _container?: ViewStyle, _text?: TextStyle): ReactNode {
     return <CodeBlock key={this.getKey()} code={text} language={language} />;
+  }
+
+  table(header: ReactNode[][], rows: ReactNode[][][]): ReactNode {
+    return <MarkdownTable key={this.getKey()} header={header} rows={rows} />;
   }
 }
 
@@ -35,9 +40,6 @@ function markdownStyles(colors: Colors): MarkedStyles {
     hr: { borderBottomColor: colors.border, borderBottomWidth: 1, marginVertical: 16 },
     li: { color: colors.text, fontSize: 16, lineHeight: 26 },
     list: { marginVertical: 2 },
-    table: { borderColor: colors.border, borderWidth: 1, borderRadius: 8, marginVertical: 8 },
-    tableRow: { borderColor: colors.border },
-    tableCell: { padding: 8, borderColor: colors.border },
   };
 }
 
