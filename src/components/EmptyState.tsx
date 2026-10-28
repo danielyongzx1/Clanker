@@ -1,11 +1,13 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Feather from '@expo/vector-icons/Feather';
+import type { ComponentProps } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '@/lib/theme';
 
-const SUGGESTIONS = [
-  { title: 'Explain', detail: 'how transformers work, simply' },
-  { title: 'Write', detail: 'a polite follow-up email' },
-  { title: 'Plan', detail: 'a 3-day trip to Kyoto' },
-  { title: 'Debug', detail: 'a React useEffect loop' },
+const SUGGESTIONS: { icon: ComponentProps<typeof Feather>['name']; tint: string; text: string }[] = [
+  { icon: 'cpu', tint: '#4C8DF6', text: 'Explain how transformers work, simply' },
+  { icon: 'mail', tint: '#EA4335', text: 'Write a polite follow-up email' },
+  { icon: 'map-pin', tint: '#34A853', text: 'Plan a 3-day trip to Kyoto' },
+  { icon: 'code', tint: '#F4B400', text: 'Debug a React useEffect loop' },
 ];
 
 type Props = {
@@ -17,52 +19,41 @@ type Props = {
 export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint }: Props) {
   const { colors } = useTheme();
 
+  if (!hasEndpoint) {
+    return (
+      <View style={styles.center}>
+        <Text style={[styles.heading, { color: colors.text }]}>Connect a model to start</Text>
+        <Pressable onPress={onAddEndpoint} style={[styles.cta, { backgroundColor: colors.sendBg }]}>
+          <Text style={[styles.ctaText, { color: colors.sendFg }]}>Add an endpoint</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      <View style={styles.center}>
-        <Text style={[styles.heading, { color: colors.text }]}>
-          {hasEndpoint ? 'What can I help with?' : 'Connect a model to start'}
-        </Text>
-        {!hasEndpoint && (
-          <Pressable onPress={onAddEndpoint} style={[styles.cta, { backgroundColor: colors.sendBg }]}>
-            <Text style={[styles.ctaText, { color: colors.sendFg }]}>Add an endpoint</Text>
-          </Pressable>
-        )}
-      </View>
-      {hasEndpoint && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.suggestions}
+      {SUGGESTIONS.map((s) => (
+        <Pressable
+          key={s.text}
+          onPress={() => onSuggestion(s.text)}
+          style={({ pressed }) => [styles.row, pressed && { opacity: 0.5 }]}
         >
-          {SUGGESTIONS.map((s) => (
-            <Pressable
-              key={s.title}
-              onPress={() => onSuggestion(`${s.title} ${s.detail}`)}
-              style={({ pressed }) => [
-                styles.chip,
-                { borderColor: colors.border, backgroundColor: pressed ? colors.surface : colors.background },
-              ]}
-            >
-              <Text style={[styles.chipTitle, { color: colors.text }]}>{s.title}</Text>
-              <Text style={[styles.chipDetail, { color: colors.textTertiary }]}>{s.detail}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      )}
+          <Feather name={s.icon} size={22} color={s.tint} />
+          <Text numberOfLines={1} style={[styles.rowText, { color: colors.text }]}>
+            {s.text}
+          </Text>
+        </Pressable>
+      ))}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'flex-end' },
+  container: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 26, paddingBottom: 14 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, gap: 20 },
   heading: { fontSize: 24, fontWeight: '600', textAlign: 'center' },
   cta: { borderRadius: 999, paddingHorizontal: 22, paddingVertical: 12 },
   ctaText: { fontSize: 15, fontWeight: '600' },
-  suggestions: { paddingHorizontal: 12, gap: 8, paddingBottom: 10 },
-  chip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, maxWidth: 220 },
-  chipTitle: { fontSize: 15, fontWeight: '600' },
-  chipDetail: { fontSize: 14, marginTop: 1 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 18, paddingVertical: 14 },
+  rowText: { fontSize: 17, flexShrink: 1 },
 });
