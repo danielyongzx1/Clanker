@@ -5,11 +5,12 @@ import { Image } from 'expo-image';
 import { memo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { attachmentUri } from '@/lib/attachments';
-import type { FilePart, ImagePart } from '@/lib/providers';
+import type { FilePart, ImagePart, ToolPart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 import { messageText, type Message } from '@/store/chats';
 import { Markdown } from './Markdown';
 import { ThinkingIndicator } from './ThinkingIndicator';
+import { ToolCall } from './ToolCall';
 
 type Props = {
   message: Message;
@@ -58,6 +59,21 @@ function Images({ images, align }: { images: ImagePart[]; align: 'flex-end' | 'f
   );
 }
 
+type Segment = { kind: 'text'; text: string } | { kind: 'tool'; part: ToolPart };
+
+/** Runs of text merged into one markdown block, with tool calls between them, in reply order. */
+function segmentsOf(message: Message): Segment[] {
+  const out: Segment[] = [];
+  for (const part of message.content) {
+    const last = out[out.length - 1];
+    if (part.type === 'text') {
+      if (last?.kind === 'text') last.text += part.text;
+      else out.push({ kind: 'text', text: part.text });
+    } else if (part.type === 'tool') out.push({ kind: 'tool', part });
+  }
+  return out;
+}
+
 function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
@@ -91,8 +107,11 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
   }
 
   const streaming = message.status === 'streaming';
-  // The pill pulses until the first answer token; then it settles to a "Thought for Ns" row.
-  const thinking = streaming && !text;
+  const segments = segmentsOf(message);
+  const lastPart = message.content[message.content.length - 1];
+  // The pill pulses until the first answer token, and again while the model works out its next
+  // step after a round of tool calls; then it settles to a "Thought for Ns" row.
+  const thinking = streaming && (!text || (lastPart?.type === 'tool' && lastPart.status !== 'running'));
   const hasReasoning = !!message.reasoning;
   // Open while thoughts stream in, unless the user collapsed them; closed once done.
   const thoughtsOpen = openOverride ?? (thinking && hasReasoning);
@@ -117,7 +136,13 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
           </View>
         </ScrollView>
       )}
-      {!!text && <Markdown value={text} />}
+      {segments.map((seg, i) =>
+        seg.kind === 'tool' ? (
+          <ToolCall key={seg.part.id} part={seg.part} />
+        ) : (
+          !!seg.text.trim() && <Markdown key={`t${i}`} value={seg.text} />
+        )
+      )}
 
       {message.status === 'error' && (
         <View style={[styles.error, { backgroundColor: colors.dangerBg, borderColor: colors.danger }]}>

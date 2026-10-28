@@ -15,11 +15,17 @@ interface SettingsState {
   theme: ThemePreference;
   /** Chosen effort level per model, keyed by `endpointId/model`. */
   efforts: Record<string, string>;
+  /** Whether models get the file, script and shell tools. */
+  tools: boolean;
+  /** History budget in tokens for models whose context window isn't known. */
+  contextBudget: number;
   upsertEndpoint: (endpoint: Endpoint) => void;
   removeEndpoint: (id: string) => void;
   setActive: (ref: ModelRef) => void;
   setTheme: (theme: ThemePreference) => void;
   setEffort: (ref: ModelRef, level: string) => void;
+  setTools: (on: boolean) => void;
+  setContextBudget: (tokens: number) => void;
 }
 
 export const useSettings = create<SettingsState>()(
@@ -29,6 +35,8 @@ export const useSettings = create<SettingsState>()(
       active: null,
       theme: 'system',
       efforts: {},
+      tools: true,
+      contextBudget: 32_000,
       upsertEndpoint: (endpoint) => {
         const exists = get().endpoints.some((e) => e.id === endpoint.id);
         const endpoints = exists
@@ -54,6 +62,8 @@ export const useSettings = create<SettingsState>()(
       setActive: (active) => set({ active }),
       setTheme: (theme) => set({ theme }),
       setEffort: (ref, level) => set({ efforts: { ...get().efforts, [effortKey(ref)]: level } }),
+      setTools: (tools) => set({ tools }),
+      setContextBudget: (contextBudget) => set({ contextBudget }),
     }),
     { name: 'settings', storage: jsonFileStorage }
   )
@@ -66,6 +76,20 @@ export function resolveEffort(state: Pick<SettingsState, 'endpoints' | 'efforts'
   if (!levels?.length) return null;
   const chosen = state.efforts[effortKey(ref)];
   return { levels, level: chosen && levels.includes(chosen) ? chosen : defaultEffort(levels) };
+}
+
+// Hosted APIs whose current models all have windows of 128K tokens or more, though not every one reports it.
+const LARGE_CONTEXT_HOSTS = /api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com|api\.deepseek\.com|api\.mistral\.ai|api\.x\.ai/i;
+
+/**
+ * Tokens of history to aim for: three quarters of the model's reported window (the rest is for
+ * the system prompt, tool definitions and the reply); 96K on large-context hosted APIs that
+ * don't report one; otherwise the user's setting, which is meant for local servers.
+ */
+export function resolveBudget(state: Pick<SettingsState, 'contextBudget'>, endpoint: Endpoint, model: string) {
+  const window = endpoint.contexts?.[model];
+  if (window) return Math.floor(window * 0.75);
+  return LARGE_CONTEXT_HOSTS.test(endpoint.baseUrl) ? 96_000 : state.contextBudget;
 }
 
 export function useEndpoint(id: string | undefined) {

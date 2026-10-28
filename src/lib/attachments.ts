@@ -4,6 +4,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import type { FilePart, ImagePart } from './providers';
 import { uid } from './storage';
+import { ensureWorkspace, fileAt, freePath } from './workspace';
 
 // Anthropic recommends a long edge of at most 1568px; other providers downscale anyway.
 const MAX_EDGE = 1568;
@@ -32,6 +33,19 @@ export function deleteAttachment(file: string) {
   if (f.exists) f.delete();
 }
 
+/** Copies an attachment into the agent workspace under its own name, returning the workspace path. */
+export function saveToWorkspace(part: FilePart | ImagePart) {
+  ensureWorkspace();
+  const name = part.type === 'image' ? 'photo.jpg' : sanitize(part.name);
+  const path = freePath(name);
+  if (part.type === 'file' && part.text != null && !part.file) {
+    fileAt(path).writeSync(part.text);
+  } else if (part.file) {
+    new File(dir, part.file).copySync(fileAt(path));
+  }
+  return path;
+}
+
 /**
  * Copies bytes into the attachments dir. NOT moveSync: content:// URIs from the document picker
  * cannot be moved or renamed, only read.
@@ -48,10 +62,18 @@ async function storeFrom(sourceUri: string, name: string) {
   }
 }
 
-async function importAsset(asset: { uri: string; width?: number; height?: number }): Promise<ImagePart> {
+/** Downscales an image into the attachments dir as JPEG; also used for images agent tools return. */
+export async function importAsset(asset: { uri: string; width?: number; height?: number }): Promise<ImagePart> {
+  let { width, height } = asset;
+  if (!width || !height) {
+    // The document picker and the workspace don't report dimensions; decode once to measure.
+    const probe = await ImageManipulator.manipulate(asset.uri).renderAsync();
+    ({ width, height } = probe);
+    probe.release();
+  }
   const context = ImageManipulator.manipulate(asset.uri);
-  if (asset.width && asset.height && Math.max(asset.width, asset.height) > MAX_EDGE) {
-    context.resize(asset.width >= asset.height ? { width: MAX_EDGE, height: null } : { width: null, height: MAX_EDGE });
+  if (Math.max(width, height) > MAX_EDGE) {
+    context.resize(width >= height ? { width: MAX_EDGE, height: null } : { width: null, height: MAX_EDGE });
   }
   const image = await context.renderAsync();
   const saved = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.8 });
@@ -91,6 +113,11 @@ function sanitize(name: string) {
   return clean || 'file';
 }
 
+function storedName(name: string) {
+  const ext = (name.match(/\.[A-Za-z0-9]+$/)?.[0] ?? '').toLowerCase();
+  return `${uid()}-${sanitize(name.replace(/\.[A-Za-z0-9]+$/, ''))}${ext}`;
+}
+
 /**
  * Picks documents (and any file type). Text-like files are read and inlined into the message;
  * images route through the same downscale pipeline as Photos; other binaries are copied into
@@ -115,10 +142,16 @@ export async function pickFiles(): Promise<(FilePart | ImagePart)[]> {
       if (isTextLike(name, mimeType)) {
         try {
           let text = await new File(asset.uri).text();
+          // The inline copy can be truncated, so keep the original for the agent's workspace.
+          let file: string | undefined;
           if (text.length > MAX_TEXT_CHARS) {
             text = text.slice(0, MAX_TEXT_CHARS) + '\n[…truncated]';
+            if (!asset.size || asset.size <= MAX_FILE_BYTES) {
+              file = storedName(name);
+              await storeFrom(asset.uri, file);
+            }
           }
-          return { type: 'file', name, mimeType, text, size: asset.size };
+          return { type: 'file', name, mimeType, text, size: asset.size, ...(file ? { file } : {}) };
         } catch {
           // Some pickers hand back a URI the text reader can't open; treat it as binary below.
         }
@@ -127,8 +160,7 @@ export async function pickFiles(): Promise<(FilePart | ImagePart)[]> {
       if (asset.size && asset.size > MAX_FILE_BYTES) {
         throw new Error(`"${name}" is larger than 20 MB.`);
       }
-      const ext = (name.match(/\.[A-Za-z0-9]+$/)?.[0] ?? '').toLowerCase();
-      const stored = `${uid()}-${sanitize(name.replace(/\.[A-Za-z0-9]+$/, ''))}${ext}`;
+      const stored = storedName(name);
       await storeFrom(asset.uri, stored);
       return { type: 'file', file: stored, name, mimeType, size: asset.size };
     })

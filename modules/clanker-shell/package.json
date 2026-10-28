@@ -1,0 +1,7 @@
+{
+  "name": "clanker-shell",
+  "version": "1.0.0",
+  "description": "Runs shell commands for Clanker's agent tools (Android only).",
+  "main": "index.ts",
+  "private": true
+}

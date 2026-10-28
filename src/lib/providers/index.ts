@@ -37,4 +37,5 @@ export const PRESETS: Preset[] = [
 ];
 
 export * from './effort';
+export { ProviderError } from './http';
 export * from './types';

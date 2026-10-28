@@ -88,6 +88,7 @@ export default function EndpointScreen() {
   const [showKey, setShowKey] = useState(false);
   const [models, setModels] = useState<string[]>(existing?.models ?? []);
   const [efforts, setEfforts] = useState<Record<string, string[]>>(existing?.efforts ?? {});
+  const [contexts, setContexts] = useState<Record<string, number>>(existing?.contexts ?? {});
   const [effortParam, setEffortParam] = useState<EffortParam>(existing?.effortParam ?? 'reasoning_effort');
   const [editingEffort, setEditingEffort] = useState<{ model: string; text: string } | null>(null);
   const [newModel, setNewModel] = useState('');
@@ -111,6 +112,7 @@ export default function EndpointScreen() {
     baseUrl: baseUrl.trim(),
     models,
     efforts: Object.fromEntries(models.flatMap((m) => (efforts[m]?.length ? [[m, efforts[m]]] : []))),
+    contexts: Object.fromEntries(models.flatMap((m) => (contexts[m] ? [[m, contexts[m]]] : []))),
     ...(type === 'openai' ? { effortParam } : {}),
     headers: parseHeaders(headersText),
   });
@@ -121,6 +123,7 @@ export default function EndpointScreen() {
     setName(preset.name === 'Custom' ? '' : preset.name);
     setModels([]);
     setEfforts({});
+    setContexts({});
     setEffortParam(preset.baseUrl.includes('openrouter.ai') ? 'reasoning' : 'reasoning_effort');
     setStatus(null);
   };
@@ -137,6 +140,9 @@ export default function EndpointScreen() {
       setModels(list.map((m) => m.id));
       const found = Object.fromEntries(list.flatMap((m) => (m.efforts ? [[m.id, m.efforts]] : [])));
       setEfforts(found);
+      setContexts(
+        Object.fromEntries(list.flatMap((m) => (m.contextLength && m.contextLength > 0 ? [[m.id, m.contextLength]] : [])))
+      );
       if (detected) setEffortParam(detected);
       const withEffort = Object.keys(found).length;
       setStatus({

@@ -1,6 +1,7 @@
 import { guessEfforts } from './effort';
 import { getJson, joinUrl, readSSE, request } from './http';
-import type { EffortParam, Endpoint, ProviderAdapter } from './types';
+import { uid } from '../storage';
+import type { EffortParam, Endpoint, ProviderAdapter, ToolCall, WireMessage } from './types';
 
 function headers(endpoint: Endpoint, apiKey?: string) {
   return { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}), ...endpoint.headers };
@@ -13,6 +14,10 @@ type OpenAIModel = {
   supported_parameters?: string[];
   /** llama-swap describes each model's input and output modalities. */
   capabilities?: { in?: unknown };
+  /** Context window: OpenRouter's `context_length`, Groq's `context_window`, LM Studio's `max_context_length`. */
+  context_length?: number;
+  context_window?: number;
+  max_context_length?: number;
 };
 
 const isOpenRouter = (endpoint: Endpoint) => endpoint.baseUrl.includes('openrouter.ai');
@@ -48,6 +53,7 @@ export const openai: ProviderAdapter = {
     const models = data
       .map((m) => ({
         id: m.id,
+        contextLength: m.context_length ?? m.context_window ?? m.max_context_length,
         efforts: m.supported_parameters
           ? m.supported_parameters.some((p) => p === 'reasoning' || p === 'reasoning_effort')
             ? ['low', 'medium', 'high']
@@ -58,34 +64,28 @@ export const openai: ProviderAdapter = {
     return { models, effortParam };
   },
 
-  async stream({ endpoint, apiKey, model, messages, system, effort, signal, onToken, onReasoning }) {
+  async stream({ endpoint, apiKey, model, messages, system, effort, tools, signal, onToken, onReasoning }) {
     const body = {
       model,
       stream: true,
       ...(effort ? effortBody(endpoint, effort) : {}),
-      messages: [
-        ...(system ? [{ role: 'system', content: system }] : []),
-        ...messages.map((m) =>
-          m.images.length === 0
-            ? { role: m.role, content: m.text }
-            : {
-                role: m.role,
-                content: [
-                  ...m.images.map((img) => ({
-                    type: 'image_url',
-                    image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
-                  })),
-                  ...(m.text ? [{ type: 'text', text: m.text }] : []),
-                ],
-              }
-        ),
-      ],
+      ...(tools?.length
+        ? {
+            tools: tools.map((t) => ({
+              type: 'function',
+              function: { name: t.name, description: t.description, parameters: t.parameters },
+            })),
+          }
+        : {}),
+      messages: [...(system ? [{ role: 'system', content: system }] : []), ...messages.flatMap(toOpenAI)],
     };
     const res = await request(joinUrl(endpoint.baseUrl, 'chat/completions'), {
       headers: { Accept: 'text/event-stream', ...headers(endpoint, apiKey) },
       body,
       signal,
     });
+    // Tool calls stream in fragments keyed by index: the id and name first, then the arguments.
+    const calls: { id?: string; name: string; args: string }[] = [];
     for await (const data of readSSE(res)) {
       if (data === '[DONE]') break;
       const json = JSON.parse(data);
@@ -97,6 +97,63 @@ export const openai: ProviderAdapter = {
       if (typeof thought === 'string' && thought) onReasoning?.(thought);
       const text = delta?.content;
       if (text) onToken(text);
+      for (const [i, tc] of ((delta?.tool_calls ?? []) as any[]).entries()) {
+        // Some servers send each call whole and leave out the index.
+        const index = typeof tc.index === 'number' ? tc.index : calls.length + i;
+        const call = (calls[index] ??= { name: '', args: '' });
+        if (tc.id) call.id = tc.id;
+        if (tc.function?.name) call.name += tc.function.name;
+        if (tc.function?.arguments != null) {
+          call.args += typeof tc.function.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function.arguments);
+        }
+      }
     }
+    const toolCalls: ToolCall[] = calls
+      .filter((c) => c?.name)
+      .map((c) => {
+        let input: Record<string, unknown> = {};
+        try {
+          input = c.args ? JSON.parse(c.args) : {};
+        } catch {
+          input = { _raw: c.args };
+        }
+        return { id: c.id ?? `call_${uid()}`, name: c.name, input };
+      });
+    return { toolCalls };
   },
 };
+
+const imageParts = (images: WireMessage['images']) =>
+  images.map((img) => ({ type: 'image_url', image_url: { url: `data:${img.mimeType};base64,${img.base64}` } }));
+
+function toOpenAI(m: WireMessage): object[] {
+  if (m.role === 'tool') {
+    const results = m.results ?? [];
+    const images = results.flatMap((r) => r.images ?? []);
+    return [
+      ...results.map((r) => ({ role: 'tool', tool_call_id: r.callId, content: r.output || '(no output)' })),
+      // Tool messages only take text here, so images the tools returned follow as a user turn.
+      ...(images.length
+        ? [{ role: 'user', content: [{ type: 'text', text: 'Images returned by the tool calls above:' }, ...imageParts(images)] }]
+        : []),
+    ];
+  }
+  if (m.toolCalls?.length) {
+    return [
+      {
+        role: 'assistant',
+        content: m.text || null,
+        tool_calls: m.toolCalls.map((c) => ({
+          id: c.id,
+          type: 'function',
+          function: { name: c.name, arguments: JSON.stringify(c.input) },
+        })),
+      },
+    ];
+  }
+  return [
+    m.images.length === 0
+      ? { role: m.role, content: m.text }
+      : { role: m.role, content: [...imageParts(m.images), ...(m.text ? [{ type: 'text', text: m.text }] : [])] },
+  ];
+}

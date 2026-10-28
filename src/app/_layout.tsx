@@ -6,11 +6,13 @@ import { Appearance } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ScriptRuntime } from '@/components/ScriptRuntime';
 import { useTheme } from '@/lib/theme';
 import { useSettings } from '@/store/settings';
 
 export default function RootLayout() {
   const themePreference = useSettings((s) => s.theme);
+  const toolsOn = useSettings((s) => s.tools);
   const { scheme, colors } = useTheme();
 
   useEffect(() => {
@@ -50,7 +52,9 @@ export default function RootLayout() {
               <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
               <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
               <Stack.Screen name="settings/endpoint" options={{ presentation: 'modal', title: 'Endpoint' }} />
+              <Stack.Screen name="settings/workspace" options={{ title: 'Workspace' }} />
             </Stack>
+            {toolsOn && <ScriptRuntime />}
           </ThemeProvider>
         </SafeAreaProvider>
       </KeyboardProvider>

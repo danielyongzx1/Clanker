@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { deleteAttachment } from '@/lib/attachments';
-import type { ContentPart, Role } from '@/lib/providers';
+import type { ContentPart, Role, ToolPart } from '@/lib/providers';
 import { jsonFileStorage, uid } from '@/lib/storage';
 
 export type MessageStatus = 'streaming' | 'done' | 'error';
@@ -20,6 +20,22 @@ export interface Message {
   thoughtMs?: number;
 }
 
+/**
+ * A range of the history the model replaced with its own summary, to save context. `start` and
+ * `end` are history unit keys (see lib/context). The originals stay in `messages`; only what is
+ * sent to the model changes. A block that swallowed earlier blocks keeps them as `children`.
+ */
+export interface CompressionBlock {
+  id: string;
+  start: string;
+  end: string;
+  summary: string;
+  createdAt: number;
+  /** Made by the app when the context ran over budget, not by the model. */
+  auto?: boolean;
+  children?: CompressionBlock[];
+}
+
 export interface Conversation {
   id: string;
   title: string;
@@ -30,6 +46,13 @@ export interface Conversation {
   endpointId: string;
   model: string;
   messages: Message[];
+  /** Top-level compression blocks, in history order. */
+  compressions?: CompressionBlock[];
+  /**
+   * Workspace files the model has seen, as path → "mtime:size" when it last read or wrote them.
+   * write_file and edit_file refuse files that are missing here or changed since.
+   */
+  observed?: Record<string, string>;
 }
 
 interface ChatsState {
@@ -42,13 +65,24 @@ interface ChatsState {
   updateMessage: (id: string, messageId: string, patch: Partial<Message>) => void;
   appendText: (id: string, messageId: string, text: string) => void;
   appendReasoning: (id: string, messageId: string, text: string) => void;
+  appendParts: (id: string, messageId: string, parts: ContentPart[]) => void;
+  patchTool: (id: string, messageId: string, toolId: string, patch: Partial<ToolPart>) => void;
+  setCompressions: (id: string, blocks: CompressionBlock[]) => void;
+  /** Records file signatures as seen by the model; null forgets a path. */
+  observe: (id: string, entries: Record<string, string | null>) => void;
   /** Removes the message with `messageId` and everything after it. */
   truncateFrom: (id: string, messageId: string) => void;
 }
 
 function imagesOf(messages: Message[]) {
   return messages.flatMap((m) =>
-    m.content.flatMap((p) => ((p.type === 'image' || p.type === 'file') && p.file ? [p.file] : []))
+    m.content.flatMap((p) =>
+      p.type === 'tool'
+        ? (p.images ?? []).map((img) => img.file)
+        : (p.type === 'image' || p.type === 'file') && p.file
+          ? [p.file]
+          : []
+    )
   );
 }
 
@@ -110,6 +144,21 @@ export const useChats = create<ChatsState>()(
           }),
         appendReasoning: (id, messageId, text) =>
           patchMessage(id, messageId, (m) => ({ reasoning: (m.reasoning ?? '') + text })),
+        appendParts: (id, messageId, parts) => patchMessage(id, messageId, (m) => ({ content: [...m.content, ...parts] })),
+        patchTool: (id, messageId, toolId, patch) =>
+          patchMessage(id, messageId, (m) => ({
+            content: m.content.map((p) => (p.type === 'tool' && p.id === toolId ? { ...p, ...patch } : p)),
+          })),
+        setCompressions: (id, compressions) => patchConversation(id, () => ({ compressions })),
+        observe: (id, entries) =>
+          patchConversation(id, (c) => {
+            const observed = { ...c.observed };
+            for (const [path, sig] of Object.entries(entries)) {
+              if (sig == null) delete observed[path];
+              else observed[path] = sig;
+            }
+            return { observed };
+          }),
         truncateFrom: (id, messageId) =>
           patchConversation(id, (c) => {
             const index = c.messages.findIndex((m) => m.id === messageId);
@@ -123,17 +172,29 @@ export const useChats = create<ChatsState>()(
       name: 'chats',
       storage: jsonFileStorage,
       partialize: (s) => ({ conversations: s.conversations }),
-      // A reply that was streaming when the app was killed can never finish.
+      // A reply, tool call or background job that was running when the app was killed can never finish.
       merge: (persisted, current) => {
         const conversations = (persisted as Pick<ChatsState, 'conversations'>)?.conversations ?? {};
         for (const c of Object.values(conversations)) {
-          c.messages = c.messages.map((m) => (m.status === 'streaming' ? { ...m, status: 'done' } : m));
+          c.messages = c.messages.map((m) => {
+            const content = m.content.map((p) =>
+              p.type === 'tool' && p.background?.status === 'running' ? { ...p, background: { ...p.background, status: 'lost' as const } } : p
+            );
+            return m.status === 'streaming' ? { ...m, status: 'done', content: content.map(interruptTool) } : { ...m, content };
+          });
         }
         return { ...current, conversations };
       },
     }
   )
 );
+
+/** Marks a tool call that never got a result as failed, so the history stays valid for the API. */
+export function interruptTool(part: ContentPart): ContentPart {
+  return part.type === 'tool' && part.status === 'running'
+    ? { ...part, status: 'error', output: part.output ?? 'Interrupted before it finished.' }
+    : part;
+}
 
 export function messageText(message: Pick<Message, 'content'>) {
   return message.content.map((p) => (p.type === 'text' ? p.text : '')).join('');

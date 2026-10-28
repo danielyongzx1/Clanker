@@ -2,7 +2,7 @@ import Feather from '@expo/vector-icons/Feather';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import type { ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { PROVIDER_LABELS } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 import { useSettings, type ThemePreference } from '@/store/settings';
@@ -24,11 +24,17 @@ const THEMES: { value: ThemePreference; label: string; icon: keyof typeof Feathe
   { value: 'dark', label: 'Dark', icon: 'moon' },
 ];
 
+const BUDGETS = [8_000, 16_000, 32_000, 64_000, 128_000];
+
 export default function SettingsScreen() {
   const { colors } = useTheme();
   const endpoints = useSettings((s) => s.endpoints);
   const theme = useSettings((s) => s.theme);
   const setTheme = useSettings((s) => s.setTheme);
+  const tools = useSettings((s) => s.tools);
+  const setTools = useSettings((s) => s.setTools);
+  const contextBudget = useSettings((s) => s.contextBudget);
+  const setContextBudget = useSettings((s) => s.setContextBudget);
 
   return (
     <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={styles.content}>
@@ -66,6 +72,53 @@ export default function SettingsScreen() {
           <Feather name="plus" size={18} color={colors.link} />
           <Text style={[styles.rowTitle, { color: colors.link }]}>Add endpoint</Text>
         </Pressable>
+      </Section>
+
+      <Section
+        title="AGENT"
+        footer={`Lets models read and write files of any type in a private workspace and run Python and JavaScript${
+          Platform.OS === 'android' ? ' and shell commands' : ''
+        } on this phone. Turn off for models that don't support tool calling.`}
+      >
+        <View style={styles.row}>
+          <Feather name="tool" size={18} color={colors.textSecondary} />
+          <Text style={[styles.rowTitle, { color: colors.text, flex: 1 }]}>File & code tools</Text>
+          <Switch value={tools} onValueChange={setTools} />
+        </View>
+        <Pressable
+          onPress={() => router.push('/settings/workspace')}
+          style={({ pressed }) => [
+            styles.row,
+            { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+            pressed && { backgroundColor: colors.surfaceHover },
+          ]}
+        >
+          <Feather name="folder" size={18} color={colors.textSecondary} />
+          <Text style={[styles.rowTitle, { color: colors.text, flex: 1 }]}>Workspace files</Text>
+          <Feather name="chevron-right" size={18} color={colors.textTertiary} />
+        </Pressable>
+      </Section>
+
+      <Section
+        title="CONTEXT BUDGET"
+        footer="How much chat history to keep for local and other servers that don't report a model's context size; set it to what your server is configured for. Models summarise older history to stay under it, and the app compresses it automatically past 90%."
+      >
+        <View style={styles.segment}>
+          {BUDGETS.map((b) => {
+            const selected = contextBudget === b;
+            return (
+              <Pressable
+                key={b}
+                onPress={() => setContextBudget(b)}
+                style={[styles.segmentItem, selected && { backgroundColor: colors.background }]}
+              >
+                <Text style={{ color: selected ? colors.text : colors.textSecondary, fontWeight: selected ? '600' : '400' }}>
+                  {b / 1000}K
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </Section>
 
       <Section title="APPEARANCE">

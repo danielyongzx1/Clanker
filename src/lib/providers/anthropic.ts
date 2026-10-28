@@ -1,5 +1,5 @@
 import { getJson, joinUrl, readSSE, request } from './http';
-import type { Endpoint, ProviderAdapter } from './types';
+import type { Endpoint, ProviderAdapter, ToolCall, WireMessage } from './types';
 
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -43,6 +43,7 @@ function thinkingBody(endpoint: Endpoint, model: string, effort?: string) {
 
 type AnthropicModel = {
   id: string;
+  max_input_tokens?: number;
   capabilities?: { effort?: { supported?: boolean } & Record<string, { supported?: boolean } | boolean | undefined> };
 };
 
@@ -69,10 +70,16 @@ function headers(endpoint: Endpoint, apiKey?: string) {
 export const anthropic: ProviderAdapter = {
   async listModels(endpoint, apiKey) {
     const json = await getJson(joinUrl(endpoint.baseUrl, 'v1/models?limit=1000'), headers(endpoint, apiKey));
-    return { models: ((json.data ?? []) as AnthropicModel[]).map((m) => ({ id: m.id, efforts: effortsOf(m) })) };
+    return {
+      models: ((json.data ?? []) as AnthropicModel[]).map((m) => ({
+        id: m.id,
+        efforts: effortsOf(m),
+        contextLength: m.max_input_tokens,
+      })),
+    };
   },
 
-  async stream({ endpoint, apiKey, model, messages, system, effort, signal, onToken, onReasoning }) {
+  async stream({ endpoint, apiKey, model, messages, system, effort, tools, signal, onToken, onReasoning }) {
     const body = {
       model,
       stream: true,
@@ -81,43 +88,96 @@ export const anthropic: ProviderAdapter = {
       max_tokens: 8192,
       ...(system ? { system } : {}),
       ...(effort ? { output_config: { effort }, ...thinkingBody(endpoint, model, effort) } : {}),
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: [
-          ...m.images.map((img) => ({
-            type: 'image',
-            source: { type: 'base64', media_type: img.mimeType, data: img.base64 },
-          })),
-          ...(m.files ?? []).map((file) => ({
-            type: 'document',
-            source: { type: 'base64', media_type: file.mimeType, data: file.base64 },
-          })),
-          // Anthropic rejects empty text blocks.
-          ...(m.text ? [{ type: 'text', text: m.text }] : []),
-        ],
-      })),
+      ...(tools?.length
+        ? { tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })) }
+        : {}),
+      messages: messages.map(toAnthropic),
     };
     const res = await request(joinUrl(endpoint.baseUrl, 'v1/messages'), {
       headers: { Accept: 'text/event-stream', ...headers(endpoint, apiKey) },
       body,
       signal,
     });
+
+    // Tool-use and thinking blocks by stream index, assembled from their deltas.
+    const blocks: Record<number, Record<string, any>> = {};
+    const toolCalls: ToolCall[] = [];
+    const thinking: unknown[] = [];
     for await (const data of readSSE(res)) {
       const event = JSON.parse(data);
       if (event.type === 'error') throw new Error(event.error?.message ?? 'Stream error');
+      if (event.type === 'content_block_start') {
+        const block = event.content_block;
+        if (block?.type === 'tool_use') blocks[event.index] = { type: 'tool_use', id: block.id, name: block.name, json: '' };
+        if (block?.type === 'thinking') blocks[event.index] = { type: 'thinking', thinking: block.thinking ?? '', signature: '' };
+        // Redacted thinking is opaque, but has to be replayed like the rest.
+        if (block?.type === 'redacted_thinking') thinking.push(block);
+      }
       if (event.type === 'content_block_delta') {
-        if (event.delta?.type === 'text_delta') onToken(event.delta.text);
-        // signature_delta and redacted_thinking carry nothing readable; skip them.
+        const block = blocks[event.index];
+        const delta = event.delta;
+        if (delta?.type === 'text_delta') onToken(delta.text);
+        if (delta?.type === 'input_json_delta' && block) block.json += delta.partial_json ?? '';
+        if (delta?.type === 'signature_delta' && block) block.signature += delta.signature ?? '';
         // Summarized thinking streams as summary_delta instead of thinking_delta.
-        if (event.delta?.type === 'thinking_delta' && event.delta.thinking) {
-          onReasoning?.(event.delta.thinking);
+        const thought = delta?.type === 'thinking_delta' ? delta.thinking : delta?.type === 'summary_delta' ? (delta.summary ?? delta.text) : '';
+        if (thought) {
+          onReasoning?.(thought);
+          if (block?.type === 'thinking') block.thinking += thought;
         }
-        if (event.delta?.type === 'summary_delta') {
-          const summary = event.delta.summary ?? event.delta.text;
-          if (summary) onReasoning?.(summary);
+      }
+      if (event.type === 'content_block_stop') {
+        const block = blocks[event.index];
+        if (block?.type === 'tool_use') {
+          let input: Record<string, unknown> = {};
+          try {
+            input = block.json ? JSON.parse(block.json) : {};
+          } catch {
+            input = { _raw: block.json };
+          }
+          toolCalls.push({ id: block.id, name: block.name, input });
         }
+        if (block?.type === 'thinking') thinking.push({ type: 'thinking', thinking: block.thinking, signature: block.signature });
       }
       if (event.type === 'message_stop') break;
     }
+    return { toolCalls, thinking: thinking.length ? thinking : undefined };
   },
 };
+
+function toAnthropic(m: WireMessage) {
+  if (m.role === 'tool') {
+    return {
+      role: 'user',
+      content: (m.results ?? []).map((r) => ({
+        type: 'tool_result',
+        tool_use_id: r.callId,
+        content: [
+          { type: 'text', text: r.output || '(no output)' },
+          ...(r.images ?? []).map((img) => ({
+            type: 'image',
+            source: { type: 'base64', media_type: img.mimeType, data: img.base64 },
+          })),
+        ],
+        ...(r.isError ? { is_error: true } : {}),
+      })),
+    };
+  }
+  return {
+    role: m.role,
+    content: [
+      ...(m.toolCalls?.length ? (m.thinking ?? []) : []),
+      ...m.images.map((img) => ({
+        type: 'image',
+        source: { type: 'base64', media_type: img.mimeType, data: img.base64 },
+      })),
+      ...(m.files ?? []).map((file) => ({
+        type: 'document',
+        source: { type: 'base64', media_type: file.mimeType, data: file.base64 },
+      })),
+      // Anthropic rejects empty text blocks.
+      ...(m.text ? [{ type: 'text', text: m.text }] : []),
+      ...(m.toolCalls ?? []).map((c) => ({ type: 'tool_use', id: c.id, name: c.name, input: c.input })),
+    ],
+  };
+}
