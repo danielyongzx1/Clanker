@@ -29,7 +29,17 @@ const BINARY_FILE_PROVIDERS: ProviderType[] = ['anthropic', 'gemini'];
 const tokensOf = (s: string) => Math.ceil(s.length / CHARS_PER_TOKEN);
 
 export function formatTokens(n: number) {
+  if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(2)}M`;
   return n < 1000 ? `${n}` : `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}K`;
+}
+
+/** Reads a token count like "32000", "32,000", "128K" or "1.5M"; null if it isn't one. */
+export function parseTokens(text: string) {
+  const match = /^(\d+(?:\.\d+)?)([km]?)$/i.exec(text.replace(/[\s,_]/g, ''));
+  if (!match) return null;
+  const scale = { '': 1, k: 1000, m: 1_000_000 }[match[2].toLowerCase() as '' | 'k' | 'm'];
+  const n = Math.round(parseFloat(match[1]) * scale);
+  return n > 0 ? n : null;
 }
 
 const refName = (ref: number) => `m${ref}`;

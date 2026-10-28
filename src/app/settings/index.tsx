@@ -24,8 +24,6 @@ const THEMES: { value: ThemePreference; label: string; icon: keyof typeof Feathe
   { value: 'dark', label: 'Dark', icon: 'moon' },
 ];
 
-const BUDGETS = [8_000, 16_000, 32_000, 64_000, 128_000];
-
 export default function SettingsScreen() {
   const { colors } = useTheme();
   const endpoints = useSettings((s) => s.endpoints);
@@ -33,8 +31,6 @@ export default function SettingsScreen() {
   const setTheme = useSettings((s) => s.setTheme);
   const tools = useSettings((s) => s.tools);
   const setTools = useSettings((s) => s.setTools);
-  const contextBudget = useSettings((s) => s.contextBudget);
-  const setContextBudget = useSettings((s) => s.setContextBudget);
 
   return (
     <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={styles.content}>
@@ -97,28 +93,6 @@ export default function SettingsScreen() {
           <Text style={[styles.rowTitle, { color: colors.text, flex: 1 }]}>Workspace files</Text>
           <Feather name="chevron-right" size={18} color={colors.textTertiary} />
         </Pressable>
-      </Section>
-
-      <Section
-        title="CONTEXT BUDGET"
-        footer="How much chat history to keep for local and other servers that don't report a model's context size; set it to what your server is configured for. Models summarise older history to stay under it, and the app compresses it automatically past 90%."
-      >
-        <View style={styles.segment}>
-          {BUDGETS.map((b) => {
-            const selected = contextBudget === b;
-            return (
-              <Pressable
-                key={b}
-                onPress={() => setContextBudget(b)}
-                style={[styles.segmentItem, selected && { backgroundColor: colors.background }]}
-              >
-                <Text style={{ color: selected ? colors.text : colors.textSecondary, fontWeight: selected ? '600' : '400' }}>
-                  {b / 1000}K
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
       </Section>
 
       <Section title="APPEARANCE">

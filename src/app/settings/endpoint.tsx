@@ -22,9 +22,10 @@ import {
   type Endpoint,
   type ProviderType,
 } from '@/lib/providers';
+import { formatTokens, parseTokens } from '@/lib/context';
 import { apiKeys, uid } from '@/lib/storage';
 import { fonts, useTheme } from '@/lib/theme';
-import { useSettings } from '@/store/settings';
+import { resolveBudget, useSettings } from '@/store/settings';
 
 const TYPES: ProviderType[] = ['openai', 'anthropic', 'ollama', 'gemini'];
 
@@ -89,8 +90,9 @@ export default function EndpointScreen() {
   const [models, setModels] = useState<string[]>(existing?.models ?? []);
   const [efforts, setEfforts] = useState<Record<string, string[]>>(existing?.efforts ?? {});
   const [contexts, setContexts] = useState<Record<string, number>>(existing?.contexts ?? {});
+  const [budgets, setBudgets] = useState<Record<string, number>>(existing?.budgets ?? {});
   const [effortParam, setEffortParam] = useState<EffortParam>(existing?.effortParam ?? 'reasoning_effort');
-  const [editingEffort, setEditingEffort] = useState<{ model: string; text: string } | null>(null);
+  const [editing, setEditing] = useState<{ model: string; field: 'effort' | 'budget'; text: string } | null>(null);
   const [newModel, setNewModel] = useState('');
   const [modelFilter, setModelFilter] = useState('');
   const [headersText, setHeadersText] = useState(
@@ -113,6 +115,7 @@ export default function EndpointScreen() {
     models,
     efforts: Object.fromEntries(models.flatMap((m) => (efforts[m]?.length ? [[m, efforts[m]]] : []))),
     contexts: Object.fromEntries(models.flatMap((m) => (contexts[m] ? [[m, contexts[m]]] : []))),
+    budgets: Object.fromEntries(models.flatMap((m) => (budgets[m] ? [[m, budgets[m]]] : []))),
     ...(type === 'openai' ? { effortParam } : {}),
     headers: parseHeaders(headersText),
   });
@@ -124,6 +127,7 @@ export default function EndpointScreen() {
     setModels([]);
     setEfforts({});
     setContexts({});
+    setBudgets({});
     setEffortParam(preset.baseUrl.includes('openrouter.ai') ? 'reasoning' : 'reasoning_effort');
     setStatus(null);
   };
@@ -194,12 +198,20 @@ export default function EndpointScreen() {
     setNewModel('');
   };
 
-  const commitEffort = () => {
-    if (!editingEffort) return;
-    const levels = [...new Set(editingEffort.text.split(/[\s,]+/).filter(Boolean).map((l) => l.toLowerCase()))];
-    const { [editingEffort.model]: _, ...rest } = efforts;
-    setEfforts(levels.length ? { ...rest, [editingEffort.model]: levels } : rest);
-    setEditingEffort(null);
+  const commitEdit = () => {
+    if (!editing) return;
+    setEditing(null);
+    if (editing.field === 'effort') {
+      const levels = [...new Set(editing.text.split(/[\s,]+/).filter(Boolean).map((l) => l.toLowerCase()))];
+      const { [editing.model]: _, ...rest } = efforts;
+      setEfforts(levels.length ? { ...rest, [editing.model]: levels } : rest);
+      return;
+    }
+    const { [editing.model]: _, ...rest } = budgets;
+    if (!editing.text.trim()) return setBudgets(rest);
+    const tokens = parseTokens(editing.text);
+    if (tokens) setBudgets({ ...rest, [editing.model]: tokens });
+    else Alert.alert('Invalid context budget', 'Enter a token count such as 32000, 128K or 1M.');
   };
 
   const save = async () => {
@@ -320,7 +332,9 @@ export default function EndpointScreen() {
 
         {models.length > 0 && (
           <Text style={[styles.hint, { color: colors.textTertiary }]}>
-            Tap a model to edit its effort levels, lowest first. Leave them empty to hide the effort control.
+            Tap a model to edit its effort levels, lowest first; leave them empty to hide the effort control. Tap its context
+            budget to set how much chat history to keep, such as 128K or 1M; leave it empty to use 75% of the reported
+            context window, or 32K for local servers that don&apos;t report one.
           </Text>
         )}
 
@@ -333,20 +347,20 @@ export default function EndpointScreen() {
             {visibleModels.slice(0, 200).map((m, i) => (
               <Pressable
                 key={m}
-                onPress={() => setEditingEffort({ model: m, text: (efforts[m] ?? []).join(', ') })}
+                onPress={() => setEditing({ model: m, field: 'effort', text: (efforts[m] ?? []).join(', ') })}
                 style={[styles.modelRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
               >
                 <View style={{ flex: 1 }}>
                   <Text numberOfLines={1} style={[styles.modelName, { color: colors.text }]}>
                     {m}
                   </Text>
-                  {editingEffort?.model === m ? (
+                  {editing?.model === m && editing.field === 'effort' ? (
                     <Input
                       autoFocus
-                      value={editingEffort.text}
-                      onChangeText={(text) => setEditingEffort({ model: m, text })}
-                      onSubmitEditing={commitEffort}
-                      onBlur={commitEffort}
+                      value={editing.text}
+                      onChangeText={(text) => setEditing({ ...editing, text })}
+                      onSubmitEditing={commitEdit}
+                      onBlur={commitEdit}
                       placeholder="low, medium, high"
                       returnKeyType="done"
                       style={[styles.effortInput, { backgroundColor: colors.background }]}
@@ -355,6 +369,34 @@ export default function EndpointScreen() {
                     <Text numberOfLines={1} style={[styles.effortLevels, { color: colors.textTertiary }]}>
                       {efforts[m]?.length ? `Effort: ${efforts[m].join(' · ')}` : 'No effort control'}
                     </Text>
+                  )}
+                  {editing?.model === m && editing.field === 'budget' ? (
+                    <Input
+                      autoFocus
+                      value={editing.text}
+                      onChangeText={(text) => setEditing({ ...editing, text })}
+                      onSubmitEditing={commitEdit}
+                      onBlur={commitEdit}
+                      placeholder="128K, 1M… (empty for auto)"
+                      returnKeyType="done"
+                      style={[styles.effortInput, { backgroundColor: colors.background }]}
+                    />
+                  ) : (
+                    <Pressable
+                      onPress={() => {
+                        // Show the short form only when it reads back as the same number.
+                        const short = budgets[m] ? formatTokens(budgets[m]) : '';
+                        const text = !short || parseTokens(short) === budgets[m] ? short : String(budgets[m]);
+                        setEditing({ model: m, field: 'budget', text });
+                      }}
+                      hitSlop={4}
+                      style={{ alignSelf: 'flex-start' }}
+                    >
+                      <Text numberOfLines={1} style={[styles.effortLevels, { color: colors.textTertiary }]}>
+                        Context budget: {formatTokens(resolveBudget({ baseUrl, contexts, budgets }, m))}
+                        {budgets[m] ? '' : ' (auto)'}
+                      </Text>
+                    </Pressable>
                   )}
                 </View>
                 <Pressable onPress={() => setModels(models.filter((x) => x !== m))} hitSlop={8}>

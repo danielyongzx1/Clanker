@@ -125,6 +125,8 @@ export interface Endpoint {
   efforts?: Record<string, string[]>;
   /** Context window in tokens per model, where the API reports it. */
   contexts?: Record<string, number>;
+  /** History budget in tokens per model, set by the user; overrides the one derived from `contexts`. */
+  budgets?: Record<string, number>;
   /** How OpenAI-compatible servers take the effort level; detected when fetching models. */
   effortParam?: EffortParam;
   /** Extra HTTP headers sent with every request, e.g. OpenRouter's HTTP-Referer. */

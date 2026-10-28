@@ -128,7 +128,7 @@ async function runCompletion(id: string) {
   };
 
   const tools = settings.tools ? availableTools() : undefined;
-  const budget = resolveBudget(settings, endpoint, conversation.model);
+  const budget = resolveBudget(endpoint, conversation.model);
   const reply = () => useChats.getState().conversations[id]?.messages.find((m) => m.id === replyId);
 
   // Attachments and tool images are re-sent every step; read each file once per reply.
