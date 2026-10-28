@@ -9,15 +9,32 @@ export type ImagePart = {
   height?: number;
 };
 
-export type ContentPart = { type: 'text'; text: string } | ImagePart;
+/** A non-image attachment. Text-like files carry `text`; binaries are stored and sent base64 where the provider takes them. */
+export type FilePart = {
+  type: 'file';
+  /** File name inside the attachments directory; omitted for text files, whose content is inlined. */
+  file?: string;
+  /** Original name as the user sees it. */
+  name: string;
+  mimeType: string;
+  /** Extracted text for text-like files; omitted for binary. */
+  text?: string;
+  size?: number;
+};
+
+export type ContentPart = { type: 'text'; text: string } | ImagePart | FilePart;
+
+export type AttachmentPart = ImagePart | FilePart;
 
 export type Role = 'user' | 'assistant';
 
-/** Message shape handed to provider adapters, with images already resolved to base64. */
+/** Message shape handed to provider adapters, with attachments already resolved to base64/text. */
 export type WireMessage = {
   role: Role;
   text: string;
   images: { base64: string; mimeType: string }[];
+  /** Binary non-image attachments; text-like files are merged into `text` before this point. */
+  files?: { name: string; mimeType: string; base64: string }[];
 };
 
 export interface Endpoint {

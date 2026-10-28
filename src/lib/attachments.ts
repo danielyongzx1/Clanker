@@ -1,11 +1,16 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import type { ImagePart } from './providers';
+import type { FilePart, ImagePart } from './providers';
 import { uid } from './storage';
 
 // Anthropic recommends a long edge of at most 1568px; other providers downscale anyway.
 const MAX_EDGE = 1568;
+// Inline text cap for picked documents; beyond it the model gets the head plus a truncation note.
+const MAX_TEXT_CHARS = 80_000;
+// Binary files above this are rejected rather than ballooned to base64 into a request body.
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
 const dir = new Directory(Paths.document, 'attachments');
 
@@ -27,16 +32,31 @@ export function deleteAttachment(file: string) {
   if (f.exists) f.delete();
 }
 
-async function importAsset(asset: ImagePicker.ImagePickerAsset): Promise<ImagePart> {
+/**
+ * Copies bytes into the attachments dir. NOT moveSync: content:// URIs from the document picker
+ * cannot be moved or renamed, only read.
+ */
+async function storeFrom(sourceUri: string, name: string) {
+  ensureDir();
+  const dest = new File(dir, name);
+  if (dest.exists) dest.delete();
+  try {
+    await dest.write(await new File(sourceUri).bytes());
+  } catch (e) {
+    const scheme = sourceUri.split('://')[0];
+    throw new Error(`Could not copy "${name}" (source: ${scheme}://): ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+async function importAsset(asset: { uri: string; width?: number; height?: number }): Promise<ImagePart> {
   const context = ImageManipulator.manipulate(asset.uri);
-  if (Math.max(asset.width, asset.height) > MAX_EDGE) {
+  if (asset.width && asset.height && Math.max(asset.width, asset.height) > MAX_EDGE) {
     context.resize(asset.width >= asset.height ? { width: MAX_EDGE, height: null } : { width: null, height: MAX_EDGE });
   }
   const image = await context.renderAsync();
   const saved = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.8 });
-  ensureDir();
   const name = `${uid()}.jpg`;
-  new File(saved.uri).moveSync(new File(dir, name));
+  await storeFrom(saved.uri, name);
   return { type: 'image', file: name, mimeType: 'image/jpeg', width: saved.width, height: saved.height };
 }
 
@@ -54,4 +74,63 @@ export async function pickImages(source: 'library' | 'camera'): Promise<ImagePar
       : await ImagePicker.launchImageLibraryAsync({ ...options, allowsMultipleSelection: true, selectionLimit: 4 });
   if (result.canceled) return [];
   return Promise.all(result.assets.map(importAsset));
+}
+
+// Extensions whose contents are worth reading as plain text, whatever the system reports as MIME.
+const TEXT_EXT =
+  /\.(txt|md|markdown|csv|tsv|json|jsonl|ndjson|ya?ml|xml|html?|css|scss|less|js|mjs|cjs|jsx|ts|tsx|py|rb|go|rs|c|h|cc|cpp|hpp|java|kt|kts|swift|scala|sh|bash|zsh|fish|ps1|bat|sql|toml|ini|cfg|conf|env|log|tex|r|lua|pl|pm|php|dart|vue|svelte|graphql|prisma|proto|makefile|cmake|gitignore|editorconfig|dockerfile)$/i;
+const TEXT_MIME = /^(application\/(json|xml|x-yaml|x-sh|x-httpd-php|x-empty-dir|x-toml|x-www-form-urlencoded)|text\/)/;
+
+function isTextLike(name: string, mimeType?: string) {
+  return TEXT_EXT.test(name) || (!!mimeType && TEXT_MIME.test(mimeType));
+}
+
+/** Keeps a name readable in the attachments dir without letting odd characters into paths. */
+function sanitize(name: string) {
+  const clean = name.replace(/[/\:*?"<>|]/g, '-').replace(/^\.+/, '').slice(-80);
+  return clean || 'file';
+}
+
+/**
+ * Picks documents (and any file type). Text-like files are read and inlined into the message;
+ * images route through the same downscale pipeline as Photos; other binaries are copied into
+ * the attachments dir and sent as base64 to providers that take them.
+ */
+export async function pickFiles(): Promise<(FilePart | ImagePart)[]> {
+  // No cache copy: on Android expo-file-system rejected reads of the picker's cached file:// copy
+  // with "Missing 'READ' permission", while the provider's content:// URI skips that path check and
+  // is read through the content resolver. Everything below reads it immediately, so the temporary
+  // grant the picker gives us is enough.
+  const result = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: false });
+  if (result.canceled) return [];
+  return Promise.all(
+    result.assets.map(async (asset): Promise<FilePart | ImagePart> => {
+      const name = asset.name || 'file';
+      const mimeType = asset.mimeType || 'application/octet-stream';
+
+      if (mimeType.startsWith('image/')) {
+        return importAsset({ uri: asset.uri });
+      }
+
+      if (isTextLike(name, mimeType)) {
+        try {
+          let text = await new File(asset.uri).text();
+          if (text.length > MAX_TEXT_CHARS) {
+            text = text.slice(0, MAX_TEXT_CHARS) + '\n[…truncated]';
+          }
+          return { type: 'file', name, mimeType, text, size: asset.size };
+        } catch {
+          // Some pickers hand back a URI the text reader can't open; treat it as binary below.
+        }
+      }
+
+      if (asset.size && asset.size > MAX_FILE_BYTES) {
+        throw new Error(`"${name}" is larger than 20 MB.`);
+      }
+      const ext = (name.match(/\.[A-Za-z0-9]+$/)?.[0] ?? '').toLowerCase();
+      const stored = `${uid()}-${sanitize(name.replace(/\.[A-Za-z0-9]+$/, ''))}${ext}`;
+      await storeFrom(asset.uri, stored);
+      return { type: 'file', file: stored, name, mimeType, size: asset.size };
+    })
+  );
 }

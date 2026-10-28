@@ -38,6 +38,7 @@ export const gemini: ProviderAdapter = {
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [
           ...m.images.map((img) => ({ inline_data: { mime_type: img.mimeType, data: img.base64 } })),
+          ...(m.files ?? []).map((file) => ({ inline_data: { mime_type: file.mimeType, data: file.base64 } })),
           ...(m.text ? [{ text: m.text }] : []),
         ],
       })),

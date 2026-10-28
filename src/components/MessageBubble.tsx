@@ -5,7 +5,7 @@ import { Image } from 'expo-image';
 import { memo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { attachmentUri } from '@/lib/attachments';
-import type { ImagePart } from '@/lib/providers';
+import type { FilePart, ImagePart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 import { messageText, type Message } from '@/store/chats';
 import { Markdown } from './Markdown';
@@ -16,6 +16,26 @@ type Props = {
   isLast: boolean;
   onRegenerate: (messageId: string) => void;
 };
+
+function Files({ files, align }: { files: FilePart[]; align: 'flex-end' | 'flex-start' }) {
+  const { colors } = useTheme();
+  if (!files.length) return null;
+  return (
+    <View style={[styles.images, { justifyContent: align }]}>
+      {files.map((f, i) => (
+        <View
+          key={`${f.file ?? f.name}-${i}`}
+          style={[styles.fileChip, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        >
+          <Feather name="paperclip" size={15} color={colors.textSecondary} />
+          <Text numberOfLines={1} style={[styles.fileName, { color: colors.text }]}>
+            {f.name}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 function Images({ images, align }: { images: ImagePart[]; align: 'flex-end' | 'flex-start' }) {
   if (!images.length) return null;
@@ -45,6 +65,7 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
   const [openOverride, setOpenOverride] = useState<boolean | null>(null);
   const text = messageText(message);
   const images = message.content.filter((p): p is ImagePart => p.type === 'image');
+  const files = message.content.filter((p): p is FilePart => p.type === 'file');
 
   const copy = async () => {
     await Clipboard.setStringAsync(text);
@@ -57,6 +78,7 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
     return (
       <View style={styles.userRow}>
         <Images images={images} align="flex-end" />
+        <Files files={files} align="flex-end" />
         {!!text && (
           <Pressable onLongPress={copy} style={[styles.userBubble, { backgroundColor: colors.userBubble }]}>
             <Text selectable style={[styles.userText, { color: colors.text }]}>
@@ -141,6 +163,17 @@ const styles = StyleSheet.create({
   userBubble: { maxWidth: '82%', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10 },
   userText: { fontSize: 16, lineHeight: 23 },
   images: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, maxWidth: '82%' },
+  fileChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    maxWidth: '82%',
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  fileName: { fontSize: 15, flexShrink: 1 },
   assistantRow: { paddingHorizontal: 16, marginVertical: 6, gap: 2 },
   thoughts: { maxHeight: 260, marginVertical: 4 },
   thoughtsInner: { borderLeftWidth: 3, paddingLeft: 12, paddingRight: 4 },

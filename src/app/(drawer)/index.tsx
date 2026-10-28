@@ -1,10 +1,11 @@
 import { router, useNavigation } from 'expo-router';
 import type { DrawerNavigationProp } from 'expo-router/drawer';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import { Alert, Keyboard, Pressable, StyleSheet, View } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { OverKeyboardView } from 'react-native-keyboard-controller';
+import { KeyboardAvoidingView, OverKeyboardView } from 'react-native-keyboard-controller';
 import { Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useShallow } from 'zustand/react/shallow';
@@ -15,7 +16,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { MessageList } from '@/components/MessageList';
 import { ModelPicker } from '@/components/ModelPicker';
 import { regenerate, sendMessage, stopStreaming } from '@/lib/chat';
-import type { ImagePart } from '@/lib/providers';
+import type { AttachmentPart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 import { useChats } from '@/store/chats';
 import { resolveEffort, useSettings } from '@/store/settings';
@@ -28,6 +29,7 @@ const VEIL_FADE = 120;
 // Eased opacity ramp (0 → 1) for the veil gradients; a linear one shows a visible edge
 // where it meets the solid part.
 const VEIL_EASE = [0, 0.06, 0.2, 0.42, 0.66, 0.86, 1];
+const EFFORT_FADE = { duration: 160 };
 
 // Keeps the keyboard height so the over-keyboard effort panel can sit just above it.
 function useKeyboard() {
@@ -80,6 +82,27 @@ export default function ChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showEffort]);
 
+  // The panel cross-fades with the composer both ways. The over-keyboard layer stays up until
+  // the fade-out finishes; hiding it with the slider would cut the panel off mid-fade.
+  const effortFade = useSharedValue(0);
+  const [effortMounted, setEffortMounted] = useState(false);
+  if (showEffort && !effortMounted) setEffortMounted(true);
+  useEffect(() => {
+    if (showEffort) {
+      effortFade.set(withTiming(1, EFFORT_FADE));
+      return;
+    }
+    effortFade.set(
+      withTiming(0, EFFORT_FADE, (finished) => {
+        'worklet';
+        if (finished) scheduleOnRN(setEffortMounted, false);
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showEffort]);
+  const effortStyle = useAnimatedStyle(() => ({ opacity: effortFade.value }));
+  const composerStyle = useAnimatedStyle(() => ({ opacity: 1 - effortFade.value }));
+
   const panelBottom = keyboardVisible ? keyboard.height + 8 : Math.max(insets.bottom, 8);
   const messages = conversation?.messages ?? [];
   const streaming = messages.some((m) => m.status === 'streaming');
@@ -97,9 +120,9 @@ export default function ChatScreen() {
   }, [currentId]);
 
   const send = useCallback(
-    (text: string, images: ImagePart[]) => {
+    (text: string, attachments: AttachmentPart[]) => {
       try {
-        const id = sendMessage(currentId, text, images);
+        const id = sendMessage(currentId, text, attachments);
         if (id !== currentId) open(id);
         setDraft('');
       } catch (e) {
@@ -133,9 +156,9 @@ export default function ChatScreen() {
         onNewChat={currentId ? () => open(null) : undefined}
       />
 
-      {/* Android already resizes the window for the keyboard; padding on top of that pushes the
-          content up twice until the next layout pass snaps it back down. */}
-      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* With KeyboardProvider mounted the Android window no longer resizes for the keyboard,
+          so both platforms pad from the keyboard height. */}
+      <KeyboardAvoidingView style={styles.container} behavior="padding">
         {messages.length > 0 ? (
           <MessageList messages={messages} onRegenerate={onRegenerate} />
         ) : (
@@ -146,9 +169,9 @@ export default function ChatScreen() {
           />
         )}
         <View style={{ paddingBottom: bottomPad, paddingTop: 4 }}>
-          {/* Hidden rather than unmounted while the slider is up, so attached images survive,
+          {/* Faded out rather than unmounted while the slider is up, so attached images survive,
               and untouchable as a backstop in case the overlay window mounts a beat late. */}
-          <View style={showEffort && styles.hidden} pointerEvents={showEffort ? 'none' : 'auto'}>
+          <Animated.View style={composerStyle} pointerEvents={showEffort ? 'none' : 'auto'}>
             <Composer
               text={draft}
               onChangeText={setDraft}
@@ -158,15 +181,15 @@ export default function ChatScreen() {
               keyboardVisible={keyboardVisible}
               effort={effort ? { ...effort, onPress: () => setEffortOpen(true) } : undefined}
             />
-          </View>
+          </Animated.View>
         </View>
       </KeyboardAvoidingView>
 
       {/* The layer floats above the keyboard window, so the keyboard keeps showing under the
           veil and stays untouched: every tap lands on this layer's scrim. */}
-      <OverKeyboardView visible={showEffort}>
+      <OverKeyboardView visible={effortMounted}>
         <GestureHandlerRootView style={styles.overlay}>
-          {showEffort && (
+          {effortMounted && (
             // Transparent: it only catches taps. The veil gradients below do the visual work,
             // so the header and content above the fade stay undimmed, as in ChatGPT.
             <Pressable
@@ -175,11 +198,14 @@ export default function ChatScreen() {
               accessibilityLabel="Close effort"
             />
           )}
-          {showEffort && effort && (
+          {effortMounted && effort && (
             // A full-width column from the top of the fade to the screen bottom. Every veil
             // piece lies inside it: Android dropped most of the pieces that used to hang
             // outside the panel's bounds while the keyboard was up, leaving a strip at the left.
-            <Animated.View entering={FadeIn.duration(160)} pointerEvents="box-none" style={styles.effort}>
+            <Animated.View
+              pointerEvents={showEffort ? 'box-none' : 'none'}
+              style={[styles.effort, effortStyle]}
+            >
               {/* Content fades out into solid background just above the label. */}
               <View pointerEvents="none" style={styles.veilFade}>
                 <Svg width="100%" height="100%">
@@ -237,7 +263,6 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  hidden: { opacity: 0 },
   // The overlay host is stretched to the full screen by its native side; children fill it.
   overlay: { flex: 1 },
   scrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },

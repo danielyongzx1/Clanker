@@ -47,7 +47,9 @@ interface ChatsState {
 }
 
 function imagesOf(messages: Message[]) {
-  return messages.flatMap((m) => m.content.flatMap((p) => (p.type === 'image' ? [p.file] : [])));
+  return messages.flatMap((m) =>
+    m.content.flatMap((p) => ((p.type === 'image' || p.type === 'file') && p.file ? [p.file] : []))
+  );
 }
 
 export const useChats = create<ChatsState>()(

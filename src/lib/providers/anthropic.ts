@@ -88,6 +88,10 @@ export const anthropic: ProviderAdapter = {
             type: 'image',
             source: { type: 'base64', media_type: img.mimeType, data: img.base64 },
           })),
+          ...(m.files ?? []).map((file) => ({
+            type: 'document',
+            source: { type: 'base64', media_type: file.mimeType, data: file.base64 },
+          })),
           // Anthropic rejects empty text blocks.
           ...(m.text ? [{ type: 'text', text: m.text }] : []),
         ],

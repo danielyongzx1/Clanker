@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, type SharedValue } from 'react-native-reanimated';
@@ -24,31 +24,36 @@ type Props = {
 
 export function EffortSlider({ levels, value, onChange }: Props) {
   const { colors } = useTheme();
-  const [width, setWidth] = useState(0);
   const index = Math.max(0, levels.indexOf(value));
   // The stop under the finger mid-drag. It stays local so only the slider re-renders until
   // release, when it's committed through onChange.
   const [preview, setPreview] = useState<number | null>(null);
   const shown = preview ?? index;
-  // Knob centre, in track coordinates. Negative until the first layout.
-  const pos = useSharedValue(-1);
+  const last = levels.length - 1;
+  const stop = (i: number) => (last > 0 ? i / last : 0);
+
+  // Knob position as a fraction of its travel, from the first stop (0) to the last (1).
+  // Everything is laid out in percentages of the track, so the first frame is already in
+  // place without waiting for a layout pass to learn the width.
+  const pos = useSharedValue(stop(index));
+  // Only the drag needs pixels, and it can't start before the track has been laid out.
+  const width = useSharedValue(0);
   // The drag runs entirely on the UI thread; JS only hears about it when the stop changes.
   const dragging = useSharedValue(false);
   const current = useSharedValue(index);
 
-  const step = levels.length > 1 ? (width - PAD * 2 - FILL) / (levels.length - 1) : 0;
-  const stopX = (i: number) => PAD + FILL / 2 + i * step;
-  const first = stopX(0);
-  const lastStop = stopX(levels.length - 1);
-  const span = width - PAD * 2;
-
+  // Springs to a level picked outside a drag (accessibility actions); a drag has already put
+  // the knob there by the time it commits.
+  const placed = useRef(stop(index));
   useEffect(() => {
     current.set(index);
-    if (!width || dragging.get()) return;
-    pos.set(pos.get() < 0 ? stopX(index) : withSpring(stopX(index), SPRING));
-    // stopX only changes with width and the level count.
+    const target = stop(index);
+    if (placed.current === target || dragging.get()) return;
+    placed.current = target;
+    pos.set(withSpring(target, SPRING));
+    // stop only changes with the level count.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index, width, levels.length]);
+  }, [index, last]);
 
   const hover = (i: number) => {
     Haptics.selectionAsync();
@@ -56,15 +61,17 @@ export function EffortSlider({ levels, value, onChange }: Props) {
   };
 
   const commit = (i: number) => {
+    placed.current = stop(i);
     if (levels[i] !== value) onChange(levels[i]);
     setPreview(null);
   };
 
   const track = (locationX: number, animate: boolean) => {
     'worklet';
-    const x = Math.min(Math.max(locationX, first), lastStop);
-    pos.set(animate ? withSpring(x, SPRING) : x);
-    const i = step ? Math.round((x - first) / step) : 0;
+    const travel = width.get() - PAD * 2 - FILL;
+    const f = travel > 0 ? Math.min(Math.max((locationX - PAD - FILL / 2) / travel, 0), 1) : 0;
+    pos.set(animate ? withSpring(f, SPRING) : f);
+    const i = Math.round(f * last);
     if (i === current.get()) return;
     current.set(i);
     scheduleOnRN(hover, i);
@@ -84,17 +91,16 @@ export function EffortSlider({ levels, value, onChange }: Props) {
     onFinalize: () => {
       'worklet';
       dragging.set(false);
-      pos.set(withSpring(first + current.get() * step, SPRING));
+      pos.set(withSpring(last > 0 ? current.get() / last : 0, SPRING));
       scheduleOnRN(commit, current.get());
     },
   });
 
-  // The fill is a full-length pill slid along inside a pill-shaped clip, so its rounded
-  // right end follows the knob using only a transform — no per-frame layout.
-  const fillStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: Math.max(FILL, pos.value + FILL / 2 - PAD) - span }],
-  }));
-  const knobStyle = useAnimatedStyle(() => ({ transform: [{ translateX: pos.value - KNOB / 2 }] }));
+  // Each moving piece is as wide as the knob's travel, so a percentage translate (of its own
+  // width) moves it exactly with the knob. The fill is a fixed cap at the first stop, a body
+  // running up to the knob and a round end under it, all clipped to the pill.
+  const bodyStyle = useAnimatedStyle(() => ({ transform: [{ translateX: `${(pos.value - 1) * 100}%` }] }));
+  const knobStyle = useAnimatedStyle(() => ({ transform: [{ translateX: `${pos.value * 100}%` }] }));
 
   const [word, rest] = describeEffort(levels[shown] ?? value);
 
@@ -106,31 +112,35 @@ export function EffortSlider({ levels, value, onChange }: Props) {
 
       <GestureDetector gesture={pan}>
         <View
-          onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+          onLayout={(e) => width.set(e.nativeEvent.layout.width)}
           accessible
           accessibilityRole="adjustable"
           accessibilityLabel="Effort"
           accessibilityValue={{ text: `${word} ${rest}` }}
           accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
           onAccessibilityAction={(e) => {
-            const i = Math.min(Math.max(index + (e.nativeEvent.actionName === 'increment' ? 1 : -1), 0), levels.length - 1);
+            const i = Math.min(Math.max(index + (e.nativeEvent.actionName === 'increment' ? 1 : -1), 0), last);
             if (i === index) return;
             Haptics.selectionAsync();
             onChange(levels[i]);
           }}
           style={[styles.track, { backgroundColor: colors.surface, borderColor: colors.chromeBorder }]}
         >
-          {width > 0 && (
-            <>
-              <View style={[styles.fillClip, { width: span }]}>
-                <Animated.View style={[styles.fill, { width: span, backgroundColor: colors.accent }, fillStyle]} />
-              </View>
-              {levels.map((level, i) => (
-                <Dot key={level} x={stopX(i)} pos={pos} off={colors.textTertiary} />
-              ))}
-              <Animated.View style={[styles.knob, knobStyle]} />
-            </>
-          )}
+          <View style={styles.fillClip}>
+            <View style={[styles.fillStart, { backgroundColor: colors.accent }]} />
+            <Animated.View style={[styles.fillBody, { backgroundColor: colors.accent }, bodyStyle]} />
+            <Animated.View style={[styles.fillRun, knobStyle]}>
+              <View style={[styles.fillEnd, { backgroundColor: colors.accent }]} />
+            </Animated.View>
+          </View>
+          <View style={styles.dots}>
+            {levels.map((level, i) => (
+              <Dot key={level} at={stop(i)} pos={pos} off={colors.textTertiary} />
+            ))}
+          </View>
+          <Animated.View style={[styles.knobRun, knobStyle]}>
+            <View style={styles.knob} />
+          </Animated.View>
         </View>
       </GestureDetector>
     </View>
@@ -138,9 +148,9 @@ export function EffortSlider({ levels, value, onChange }: Props) {
 }
 
 /** A stop marker, tinted to sit on the fill once the knob has passed it. */
-function Dot({ x, pos, off }: { x: number; pos: SharedValue<number>; off: string }) {
-  const style = useAnimatedStyle(() => ({ backgroundColor: pos.value > x ? 'rgba(255,255,255,0.35)' : off }));
-  return <Animated.View style={[styles.dot, { left: x - DOT / 2 }, style]} />;
+function Dot({ at, pos, off }: { at: number; pos: SharedValue<number>; off: string }) {
+  const style = useAnimatedStyle(() => ({ backgroundColor: pos.value > at ? 'rgba(255,255,255,0.35)' : off }));
+  return <Animated.View style={[styles.dot, style]} />;
 }
 
 const styles = StyleSheet.create({
@@ -149,20 +159,38 @@ const styles = StyleSheet.create({
   fillClip: {
     position: 'absolute',
     left: PAD,
+    right: PAD,
     top: PAD,
     height: FILL,
     borderRadius: FILL / 2,
     overflow: 'hidden',
   },
-  fill: { height: FILL, borderRadius: FILL / 2 },
-  dot: { position: 'absolute', top: (HEIGHT - DOT) / 2, width: DOT, height: DOT, borderRadius: DOT / 2 },
-  knob: {
+  // The fill at the first stop, so a spring overshooting it never shrinks the fill smaller.
+  fillStart: { position: 'absolute', left: 0, width: FILL, height: FILL, borderRadius: FILL / 2 },
+  // Ends at the knob centre at the last stop, before it's slid back.
+  fillBody: { position: 'absolute', left: FILL / 2, right: FILL / 2, height: FILL },
+  // Carries the round end of the fill under the knob.
+  fillRun: { position: 'absolute', left: 0, right: FILL, height: FILL },
+  fillEnd: { width: FILL, height: FILL, borderRadius: FILL / 2 },
+  // Spaced so the dot centres land on the stops.
+  dots: {
     position: 'absolute',
-    left: 0,
-    top: (HEIGHT - KNOB) / 2,
-    width: KNOB,
-    height: KNOB,
-    borderRadius: KNOB / 2,
-    backgroundColor: '#FFFFFF',
+    left: PAD + FILL / 2 - DOT / 2,
+    right: PAD + FILL / 2 - DOT / 2,
+    top: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
+  dot: { width: DOT, height: DOT, borderRadius: DOT / 2 },
+  // As wide as the knob's travel, with the knob at its left edge centred on the first stop.
+  knobRun: {
+    position: 'absolute',
+    left: PAD + FILL / 2 - KNOB / 2,
+    right: PAD + FILL / 2 + KNOB / 2,
+    top: (HEIGHT - KNOB) / 2,
+    height: KNOB,
+  },
+  knob: { width: KNOB, height: KNOB, borderRadius: KNOB / 2, backgroundColor: '#FFFFFF' },
 });

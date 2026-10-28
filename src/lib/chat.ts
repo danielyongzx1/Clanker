@@ -1,7 +1,7 @@
 import { messageText, useChats, type Message } from '@/store/chats';
 import { resolveEffort, useSettings } from '@/store/settings';
 import { readAttachmentBase64 } from './attachments';
-import { getAdapter, type Endpoint, type ImagePart, type WireMessage } from './providers';
+import { getAdapter, type AttachmentPart, type Endpoint, type ProviderType, type WireMessage } from './providers';
 import { apiKeys } from './storage';
 
 const controllers = new Map<string, AbortController>();
@@ -9,17 +9,39 @@ const controllers = new Map<string, AbortController>();
 // Batch tokens so the store (and the markdown re-render) updates at most ~25 times a second.
 const FLUSH_MS = 40;
 
-async function toWire(message: Message): Promise<WireMessage> {
+// Providers that take binary non-image attachments inline (PDFs and the like).
+const BINARY_FILE_PROVIDERS: ProviderType[] = ['anthropic', 'gemini'];
+
+async function toWire(message: Message, endpointType: ProviderType): Promise<WireMessage> {
   const images: WireMessage['images'] = [];
+  const files: NonNullable<WireMessage['files']> = [];
+  let text = messageText(message);
   for (const part of message.content) {
-    if (part.type !== 'image') continue;
-    try {
-      images.push({ base64: await readAttachmentBase64(part.file), mimeType: part.mimeType });
-    } catch {
-      // The attachment file is gone; send the text alone rather than failing the request.
+    if (part.type === 'image') {
+      try {
+        images.push({ base64: await readAttachmentBase64(part.file), mimeType: part.mimeType });
+      } catch {
+        // The attachment file is gone; send the text alone rather than failing the request.
+      }
+    } else if (part.type === 'file') {
+      if (part.text != null) {
+        // Text-like file: inline it so every provider can read it.
+        text += `\n\nAttached file "${part.name}":\n\n${part.text}`;
+      } else if (part.file) {
+        try {
+          const base64 = await readAttachmentBase64(part.file);
+          if (BINARY_FILE_PROVIDERS.includes(endpointType)) {
+            files.push({ name: part.name, mimeType: part.mimeType, base64 });
+          } else {
+            text += `\n\n[Attached ${part.mimeType} file "${part.name}" — this endpoint cannot receive binary files.]`;
+          }
+        } catch {
+          text += `\n\n[Attached file "${part.name}" is no longer available.]`;
+        }
+      }
     }
   }
-  return { role: message.role, text: messageText(message), images };
+  return { role: message.role, text, images, ...(files.length ? { files } : {}) };
 }
 
 function fallbackTitle(text: string) {
@@ -28,7 +50,7 @@ function fallbackTitle(text: string) {
 }
 
 /** Starts a new conversation (when `conversationId` is null) or continues one, and streams the reply. */
-export function sendMessage(conversationId: string | null, text: string, images: ImagePart[]) {
+export function sendMessage(conversationId: string | null, text: string, attachments: AttachmentPart[]) {
   const { active } = useSettings.getState();
   if (!active) throw new Error('Add an endpoint in Settings to start chatting.');
   const chats = useChats.getState();
@@ -37,7 +59,7 @@ export function sendMessage(conversationId: string | null, text: string, images:
   chats.setModel(id, active.endpointId, active.model);
   chats.addMessage(id, {
     role: 'user',
-    content: [...images, ...(text ? [{ type: 'text' as const, text }] : [])],
+    content: [...attachments, ...(text ? [{ type: 'text' as const, text }] : [])],
     status: 'done',
   });
   if (!conversationId) chats.rename(id, fallbackTitle(text), false);
@@ -111,7 +133,7 @@ async function runCompletion(id: string) {
       apiKey,
       model: conversation.model,
       effort: effort?.level,
-      messages: await Promise.all(history.map(toWire)),
+      messages: await Promise.all(history.map((m) => toWire(m, endpoint.type))),
       signal: controller.signal,
       onToken: (token) => {
         markThoughtDone();

@@ -2,11 +2,13 @@ import Feather from '@expo/vector-icons/Feather';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Keyboard, Pressable, ScrollView, StyleSheet, TextInput, View, type TextInputInstance } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type HostInstance, type TextInputInstance } from 'react-native';
 import Animated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
-import { attachmentUri, deleteAttachment, pickImages } from '@/lib/attachments';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AttachmentMenu, type AttachAction } from '@/components/AttachmentMenu';
+import { attachmentUri, deleteAttachment, pickFiles, pickImages } from '@/lib/attachments';
 import { EffortMeter } from '@/components/EffortMeter';
-import type { ImagePart } from '@/lib/providers';
+import type { AttachmentPart, FilePart, ImagePart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 
 // The composer is a one-line pill while the keyboard is down and a two-row box (text above,
@@ -20,12 +22,14 @@ const COLLAPSED = { margin: 36, padLeft: TOOLBAR_PAD + BUTTON + 2, padRight: TOO
 const EXPANDED = { margin: 12, padLeft: 16, padRight: 16, padBottom: ROW - 6 };
 const TWEEN = { duration: 280, easing: Easing.bezier(0.2, 0, 0, 1) };
 const TOOLBAR_GAP = 4;
+// Height of the horizontal attachment strip (thumb row) added above the text: 12 + 64 + 2.
+const THUMB_ROW = 78;
 
 type Props = {
   text: string;
   onChangeText: (text: string) => void;
   streaming: boolean;
-  onSend: (text: string, images: ImagePart[]) => void;
+  onSend: (text: string, attachments: AttachmentPart[]) => void;
   onStop: () => void;
   /** Keeps the box expanded for exactly as long as the keyboard is on screen. */
   keyboardVisible: boolean;
@@ -35,11 +39,22 @@ type Props = {
 
 export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboardVisible, effort }: Props) {
   const { colors } = useTheme();
-  const [images, setImages] = useState<ImagePart[]>([]);
+  const insets = useSafeAreaInsets();
+  const [attachments, setAttachments] = useState<AttachmentPart[]>([]);
   const [importing, setImporting] = useState(false);
-  const canSend = !streaming && !importing && (text.trim().length > 0 || images.length > 0);
+  const images = attachments.filter((a): a is ImagePart => a.type === 'image');
+  const files = attachments.filter((a): a is FilePart => a.type === 'file');
+  const canSend = !streaming && !importing && (text.trim().length > 0 || attachments.length > 0);
   const input = useRef<TextInputInstance>(null);
+  // A zero-impact overlay inside the box that we can measure (Animated.View refs are awkwardly
+  // typed); its window position is the box's content top-left.
+  const box = useRef<HostInstance>(null);
   const progress = useSharedValue(0);
+
+  // Attach popover: anchored to the box's top-left corner, measured at open time so it tracks
+  // the box wherever the keyboard has pushed it.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [anchor, setAnchor] = useState({ x: TOOLBAR_PAD + 8, bottom: 96 });
   // Collapsed, the text runs up to the right-hand buttons, so leave room for the effort one too.
   const collapsedPadRight = COLLAPSED.padRight + (effort ? BUTTON + TOOLBAR_GAP : 0);
 
@@ -68,60 +83,97 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
     paddingRight: interpolate(progress.value, [0, 1], [collapsedPadRight, EXPANDED.padRight]),
   }));
 
-  const attach = async (source: 'library' | 'camera') => {
+  const attach = async (source: AttachAction) => {
+    setMenuOpen(false);
     setImporting(true);
     try {
-      const picked = await pickImages(source);
-      setImages((prev) => [...prev, ...picked]);
+      const picked =
+        source === 'files' ? await pickFiles() : await pickImages(source === 'camera' ? 'camera' : 'library');
+      setAttachments((prev) => [...prev, ...picked]);
     } catch (e) {
-      Alert.alert('Could not attach image', e instanceof Error ? e.message : String(e));
+      Alert.alert('Could not attach', e instanceof Error ? e.message : String(e));
     } finally {
       setImporting(false);
     }
   };
 
-  const openAttachMenu = () =>
-    Alert.alert('Attach', undefined, [
-      { text: 'Camera', onPress: () => attach('camera') },
-      { text: 'Photos', onPress: () => attach('library') },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+  // The popover floats above the box. With no keyboard it anchors where the box measures to
+  // sit; with the keyboard up the box will collapse to a known layout under the keyboard, so
+  // it anchors there while the keyboard retreats.
+  const openAttachMenu = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (keyboardVisible) {
+      const collapsedH = ROW + (attachments.length > 0 || importing ? THUMB_ROW : 0);
+      setAnchor({ x: COLLAPSED.margin + TOOLBAR_PAD, bottom: collapsedH + Math.max(insets.bottom, 8) + 8 });
+      Keyboard.dismiss();
+      setMenuOpen(true);
+      return;
+    }
+    box.current?.measureInWindow((x, y) => {
+      setAnchor({ x: x + TOOLBAR_PAD, bottom: Dimensions.get('window').height - y + 8 });
+      setMenuOpen(true);
+    });
+  };
 
-  const removeImage = (file: string) => {
-    deleteAttachment(file);
-    setImages((prev) => prev.filter((img) => img.file !== file));
+  const removeAttachment = (a: AttachmentPart) => {
+    if (a.type === 'image' && a.file) deleteAttachment(a.file);
+    if (a.type === 'file' && a.file) deleteAttachment(a.file);
+    setAttachments((prev) => prev.filter((x) => x !== a));
   };
 
   const send = () => {
     if (!canSend) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onSend(text.trim(), images);
-    setImages([]);
+    onSend(text.trim(), attachments);
+    setAttachments([]);
   };
 
   return (
-    <Animated.View style={[styles.box, { backgroundColor: colors.composer }, boxStyle]}>
-      {(images.length > 0 || importing) && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbs}>
-          {images.map((img) => (
-            <View key={img.file}>
-              <Image source={{ uri: attachmentUri(img.file) }} style={styles.thumb} contentFit="cover" />
-              <Pressable
-                onPress={() => removeImage(img.file)}
-                hitSlop={8}
-                style={[styles.remove, { backgroundColor: colors.text }]}
-              >
-                <Feather name="x" size={12} color={colors.background} />
-              </Pressable>
-            </View>
-          ))}
-          {importing && (
-            <View style={[styles.thumb, styles.loading, { backgroundColor: colors.surface }]}>
-              <ActivityIndicator color={colors.textSecondary} />
-            </View>
-          )}
-        </ScrollView>
-      )}
+    <>
+      <AttachmentMenu
+        visible={menuOpen}
+        x={anchor.x}
+        bottom={anchor.bottom}
+        onPick={attach}
+        onClose={() => setMenuOpen(false)}
+      />
+      <Animated.View ref={box} style={[styles.box, { backgroundColor: colors.composer }, boxStyle]}>
+        {(attachments.length > 0 || importing) && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbs}>
+            {images.map((img) => (
+              <View key={img.file}>
+                <Image source={{ uri: attachmentUri(img.file) }} style={styles.thumb} contentFit="cover" />
+                <Pressable
+                  onPress={() => removeAttachment(img)}
+                  hitSlop={8}
+                  style={[styles.remove, { backgroundColor: colors.text }]}
+                >
+                  <Feather name="x" size={12} color={colors.background} />
+                </Pressable>
+              </View>
+            ))}
+            {files.map((f, i) => (
+              <View key={`${f.file ?? f.name}-${i}`} style={[styles.fileChip, { backgroundColor: colors.surface }]}>
+                <Feather name="paperclip" size={14} color={colors.textSecondary} />
+                <Text numberOfLines={1} style={[styles.fileChipName, { color: colors.text }]}>
+                  {f.name}
+                </Text>
+                <Pressable
+                  onPress={() => removeAttachment(f)}
+                  hitSlop={8}
+                  style={[styles.remove, { backgroundColor: colors.text }]}
+                >
+                  <Feather name="x" size={12} color={colors.background} />
+                </Pressable>
+              </View>
+            ))}
+            {importing && (
+              <View style={[styles.thumb, styles.loading, { backgroundColor: colors.surface }]}>
+                <ActivityIndicator color={colors.textSecondary} />
+              </View>
+            )}
+          </ScrollView>
+        )}
 
       <Animated.View style={inputStyle}>
         <TextInput
@@ -180,6 +232,7 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
         </View>
       </View>
     </Animated.View>
+    </>
   );
 }
 
@@ -187,6 +240,16 @@ const styles = StyleSheet.create({
   box: { borderRadius: ROW / 2, overflow: 'hidden' },
   thumbs: { gap: 8, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 2 },
   thumb: { width: 64, height: 64, borderRadius: 14 },
+  fileChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    height: 40,
+    maxWidth: 180,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+  },
+  fileChipName: { fontSize: 14, flexShrink: 1 },
   loading: { alignItems: 'center', justifyContent: 'center' },
   remove: {
     position: 'absolute',
