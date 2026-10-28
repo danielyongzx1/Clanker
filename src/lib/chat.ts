@@ -1,5 +1,5 @@
 import { messageText, useChats, type Message } from '@/store/chats';
-import { useSettings } from '@/store/settings';
+import { resolveEffort, useSettings } from '@/store/settings';
 import { readAttachmentBase64 } from './attachments';
 import { getAdapter, type Endpoint, type ImagePart, type WireMessage } from './providers';
 import { apiKeys } from './storage';
@@ -63,7 +63,9 @@ async function runCompletion(id: string) {
   const chats = useChats.getState();
   const conversation = chats.conversations[id];
   if (!conversation) return;
-  const endpoint = useSettings.getState().endpoints.find((e) => e.id === conversation.endpointId);
+  const settings = useSettings.getState();
+  const endpoint = settings.endpoints.find((e) => e.id === conversation.endpointId);
+  const effort = resolveEffort(settings, { endpointId: conversation.endpointId, model: conversation.model });
 
   const history = conversation.messages.filter((m) => m.status === 'done');
   const replyId = chats.addMessage(id, {
@@ -95,6 +97,7 @@ async function runCompletion(id: string) {
       endpoint,
       apiKey,
       model: conversation.model,
+      effort: effort?.level,
       messages: await Promise.all(history.map(toWire)),
       signal: controller.signal,
       onToken: (token) => {
@@ -136,6 +139,8 @@ async function generateTitle(id: string, endpoint: Endpoint, apiKey: string | un
       endpoint,
       apiKey,
       model,
+      // Titles don't need deliberation; the lowest level keeps them quick.
+      effort: endpoint.efforts?.[model]?.[0],
       signal: controller.signal,
       messages: [
         {

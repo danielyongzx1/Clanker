@@ -13,12 +13,26 @@ import {
   View,
   type TextInputProps,
 } from 'react-native';
-import { getAdapter, PRESETS, PROVIDER_LABELS, type Endpoint, type ProviderType } from '@/lib/providers';
+import {
+  getAdapter,
+  guessEfforts,
+  PRESETS,
+  PROVIDER_LABELS,
+  type EffortParam,
+  type Endpoint,
+  type ProviderType,
+} from '@/lib/providers';
 import { apiKeys, uid } from '@/lib/storage';
 import { fonts, useTheme } from '@/lib/theme';
 import { useSettings } from '@/store/settings';
 
 const TYPES: ProviderType[] = ['openai', 'anthropic', 'ollama', 'gemini'];
+
+const EFFORT_PARAMS: { value: EffortParam; label: string }[] = [
+  { value: 'reasoning_effort', label: 'OpenAI' },
+  { value: 'reasoning', label: 'OpenRouter' },
+  { value: 'chat_template_kwargs', label: 'llama.cpp / llama-swap' },
+];
 
 function parseHeaders(text: string) {
   const headers: Record<string, string> = {};
@@ -73,6 +87,9 @@ export default function EndpointScreen() {
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [models, setModels] = useState<string[]>(existing?.models ?? []);
+  const [efforts, setEfforts] = useState<Record<string, string[]>>(existing?.efforts ?? {});
+  const [effortParam, setEffortParam] = useState<EffortParam>(existing?.effortParam ?? 'reasoning_effort');
+  const [editingEffort, setEditingEffort] = useState<{ model: string; text: string } | null>(null);
   const [newModel, setNewModel] = useState('');
   const [modelFilter, setModelFilter] = useState('');
   const [headersText, setHeadersText] = useState(
@@ -93,6 +110,8 @@ export default function EndpointScreen() {
     type,
     baseUrl: baseUrl.trim(),
     models,
+    efforts: Object.fromEntries(models.flatMap((m) => (efforts[m]?.length ? [[m, efforts[m]]] : []))),
+    ...(type === 'openai' ? { effortParam } : {}),
     headers: parseHeaders(headersText),
   });
 
@@ -101,6 +120,8 @@ export default function EndpointScreen() {
     setBaseUrl(preset.baseUrl);
     setName(preset.name === 'Custom' ? '' : preset.name);
     setModels([]);
+    setEfforts({});
+    setEffortParam(preset.baseUrl.includes('openrouter.ai') ? 'reasoning' : 'reasoning_effort');
     setStatus(null);
   };
 
@@ -109,9 +130,21 @@ export default function EndpointScreen() {
     setBusy('fetch');
     setStatus(null);
     try {
-      const list = await getAdapter(type).listModels(draft(), apiKey.trim() || undefined);
-      setModels(list);
-      setStatus({ ok: true, text: `Found ${list.length} model${list.length === 1 ? '' : 's'}.` });
+      const { models: list, effortParam: detected } = await getAdapter(type).listModels(
+        draft(),
+        apiKey.trim() || undefined
+      );
+      setModels(list.map((m) => m.id));
+      const found = Object.fromEntries(list.flatMap((m) => (m.efforts ? [[m.id, m.efforts]] : [])));
+      setEfforts(found);
+      if (detected) setEffortParam(detected);
+      const withEffort = Object.keys(found).length;
+      setStatus({
+        ok: true,
+        text:
+          `Found ${list.length} model${list.length === 1 ? '' : 's'}` +
+          (withEffort ? `, ${withEffort} with effort levels.` : '.'),
+      });
     } catch (e) {
       setStatus({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -147,8 +180,20 @@ export default function EndpointScreen() {
 
   const addModel = () => {
     const m = newModel.trim();
-    if (m && !models.includes(m)) setModels([...models, m]);
+    if (m && !models.includes(m)) {
+      setModels([...models, m]);
+      const guessed = guessEfforts(type, m, effortParam);
+      if (guessed) setEfforts({ ...efforts, [m]: guessed });
+    }
     setNewModel('');
+  };
+
+  const commitEffort = () => {
+    if (!editingEffort) return;
+    const levels = [...new Set(editingEffort.text.split(/[\s,]+/).filter(Boolean).map((l) => l.toLowerCase()))];
+    const { [editingEffort.model]: _, ...rest } = efforts;
+    setEfforts(levels.length ? { ...rest, [editingEffort.model]: levels } : rest);
+    setEditingEffort(null);
   };
 
   const save = async () => {
@@ -267,6 +312,12 @@ export default function EndpointScreen() {
           </Pressable>
         </View>
 
+        {models.length > 0 && (
+          <Text style={[styles.hint, { color: colors.textTertiary }]}>
+            Tap a model to edit its effort levels, lowest first. Leave them empty to hide the effort control.
+          </Text>
+        )}
+
         {models.length > 10 && (
           <Input value={modelFilter} onChangeText={setModelFilter} placeholder="Filter models" style={{ marginTop: 8 }} />
         )}
@@ -274,17 +325,36 @@ export default function EndpointScreen() {
         {models.length > 0 && (
           <View style={[styles.modelList, { backgroundColor: colors.surface }]}>
             {visibleModels.slice(0, 200).map((m, i) => (
-              <View
+              <Pressable
                 key={m}
+                onPress={() => setEditingEffort({ model: m, text: (efforts[m] ?? []).join(', ') })}
                 style={[styles.modelRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
               >
-                <Text numberOfLines={1} style={[styles.modelName, { color: colors.text }]}>
-                  {m}
-                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text numberOfLines={1} style={[styles.modelName, { color: colors.text }]}>
+                    {m}
+                  </Text>
+                  {editingEffort?.model === m ? (
+                    <Input
+                      autoFocus
+                      value={editingEffort.text}
+                      onChangeText={(text) => setEditingEffort({ model: m, text })}
+                      onSubmitEditing={commitEffort}
+                      onBlur={commitEffort}
+                      placeholder="low, medium, high"
+                      returnKeyType="done"
+                      style={[styles.effortInput, { backgroundColor: colors.background }]}
+                    />
+                  ) : (
+                    <Text numberOfLines={1} style={[styles.effortLevels, { color: colors.textTertiary }]}>
+                      {efforts[m]?.length ? `Effort: ${efforts[m].join(' · ')}` : 'No effort control'}
+                    </Text>
+                  )}
+                </View>
                 <Pressable onPress={() => setModels(models.filter((x) => x !== m))} hitSlop={8}>
                   <Feather name="x" size={16} color={colors.textTertiary} />
                 </Pressable>
-              </View>
+              </Pressable>
             ))}
             {visibleModels.length > 200 && (
               <Text style={[styles.hint, { color: colors.textTertiary, padding: 12 }]}>
@@ -306,6 +376,22 @@ export default function EndpointScreen() {
           >
             <Text style={{ color: colors.textTertiary, fontSize: 14 }}>Remove all</Text>
           </Pressable>
+        )}
+
+        {type === 'openai' && (
+          <>
+            <Label>Effort parameter</Label>
+            <View style={styles.chips}>
+              {EFFORT_PARAMS.map((p) => (
+                <Chip key={p.value} label={p.label} selected={effortParam === p.value} onPress={() => setEffortParam(p.value)} />
+              ))}
+            </View>
+            <Text style={[styles.hint, { color: colors.textTertiary }]}>
+              {effortParam === 'chat_template_kwargs'
+                ? 'Sent as chat_template_kwargs: levels "off" and "on" set enable_thinking, any other level sets reasoning_effort (gpt-oss).'
+                : 'How the server takes the effort level. Detected when you fetch models.'}
+            </Text>
+          </>
         )}
 
         <Label>Extra headers</Label>
@@ -368,7 +454,9 @@ const styles = StyleSheet.create({
   addButton: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   modelList: { borderRadius: 12, marginTop: 8, overflow: 'hidden' },
   modelRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12 },
-  modelName: { flex: 1, fontSize: 15, fontFamily: fonts.mono },
+  modelName: { fontSize: 15, fontFamily: fonts.mono },
+  effortLevels: { fontSize: 13, marginTop: 3 },
+  effortInput: { marginTop: 8, paddingVertical: 8, fontSize: 14 },
   button: {
     flexDirection: 'row',
     alignItems: 'center',

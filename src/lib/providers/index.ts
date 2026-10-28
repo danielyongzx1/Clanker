@@ -36,4 +36,5 @@ export const PRESETS: Preset[] = [
   { name: 'Custom', type: 'openai', baseUrl: '', needsKey: false },
 ];
 
+export * from './effort';
 export * from './types';
