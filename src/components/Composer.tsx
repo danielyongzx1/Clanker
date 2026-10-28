@@ -10,7 +10,9 @@ import type { ImagePart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 
 // The composer is a one-line pill while the keyboard is down and a two-row box (text above,
-// toolbar below) while typing. One progress value drives every dimension between the two.
+// toolbar below) while the keyboard is up. One progress value drives every dimension between
+// the two. Expansion follows the keyboard, not input focus, so blurring the TextInput (tapping
+// a toolbar button, switching focus) never shrinks the box while the keyboard is still showing.
 const ROW = 52;
 const BUTTON = 36;
 const TOOLBAR_PAD = 8;
@@ -25,11 +27,13 @@ type Props = {
   streaming: boolean;
   onSend: (text: string, images: ImagePart[]) => void;
   onStop: () => void;
+  /** Keeps the box expanded for exactly as long as the keyboard is on screen. */
+  keyboardVisible: boolean;
   /** Shown when the selected model takes an effort level. */
   effort?: { levels: string[]; level: string; onPress: () => void };
 };
 
-export function Composer({ text, onChangeText, streaming, onSend, onStop, effort }: Props) {
+export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboardVisible, effort }: Props) {
   const { colors } = useTheme();
   const [images, setImages] = useState<ImagePart[]>([]);
   const [importing, setImporting] = useState(false);
@@ -39,12 +43,16 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, effort
   // Collapsed, the text runs up to the right-hand buttons, so leave room for the effort one too.
   const collapsedPadRight = COLLAPSED.padRight + (effort ? BUTTON + TOOLBAR_GAP : 0);
 
-  const setExpanded = (expanded: boolean) => {
-    progress.value = withTiming(expanded ? 1 : 0, TWEEN);
-  };
+  // Expand for exactly as long as the keyboard is on screen. Driving this from the keyboard
+  // rather than focus means tapping a toolbar button (which blurs the TextInput) keeps the box
+  // big until the keyboard itself goes away.
+  useEffect(() => {
+    progress.value = withTiming(keyboardVisible ? 1 : 0, TWEEN);
+  }, [keyboardVisible, progress]);
 
-  // Dismissing the keyboard (back gesture, swipe) leaves the input focused on Android, so blur it
-  // to collapse the pill and make the next tap fire onFocus again.
+  // Dismissing the keyboard (back gesture, swipe) can leave the input focused on Android, so
+  // blur it to make the next tap fire again. Collapse no longer depends on this — the keyboard
+  // state drives it.
   useEffect(() => {
     const blur = () => input.current?.blur();
     const subs = [Keyboard.addListener('keyboardWillHide', blur), Keyboard.addListener('keyboardDidHide', blur)];
@@ -120,8 +128,6 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, effort
           ref={input}
           value={text}
           onChangeText={onChangeText}
-          onFocus={() => setExpanded(true)}
-          onBlur={() => setExpanded(false)}
           placeholder="Ask anything"
           placeholderTextColor={colors.textTertiary}
           multiline

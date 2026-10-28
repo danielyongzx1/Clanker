@@ -1,8 +1,10 @@
 import { router, useNavigation } from 'expo-router';
 import type { DrawerNavigationProp } from 'expo-router/drawer';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated, { FadeIn } from 'react-native-reanimated';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { OverKeyboardView } from 'react-native-keyboard-controller';
 import { Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useShallow } from 'zustand/react/shallow';
@@ -22,25 +24,30 @@ import { useUI } from '@/store/ui';
 // Effort panel backdrop: a solid wash of background from just above the label down to the
 // screen bottom, with a fade of VEIL_FADE above it, so text behind the panel drops out.
 const VEIL_CAP = 26;
-const VEIL_FADE = 96;
+const VEIL_FADE = 120;
+// Eased opacity ramp (0 → 1) for the veil gradients; a linear one shows a visible edge
+// where it meets the solid part.
+const VEIL_EASE = [0, 0.06, 0.2, 0.42, 0.66, 0.86, 1];
 
-function useKeyboardVisible() {
-  const [visible, setVisible] = useState(false);
+// Keeps the keyboard height so the over-keyboard effort panel can sit just above it.
+function useKeyboard() {
+  const [state, setState] = useState({ visible: false, height: 0 });
   useEffect(() => {
-    const show = Keyboard.addListener('keyboardWillShow', () => setVisible(true));
-    const showAndroid = Keyboard.addListener('keyboardDidShow', () => setVisible(true));
-    const hide = Keyboard.addListener('keyboardWillHide', () => setVisible(false));
-    const hideAndroid = Keyboard.addListener('keyboardDidHide', () => setVisible(false));
-    return () => [show, showAndroid, hide, hideAndroid].forEach((s) => s.remove());
+    const show = (height: number) => setState({ visible: true, height });
+    const showWill = Keyboard.addListener('keyboardWillShow', (e) => show(e.endCoordinates.height));
+    const showDid = Keyboard.addListener('keyboardDidShow', (e) => show(e.endCoordinates.height));
+    const hide = () => setState((s) => ({ visible: false, height: s.height }));
+    const hideWill = Keyboard.addListener('keyboardWillHide', hide);
+    const hideDid = Keyboard.addListener('keyboardDidHide', hide);
+    return () => [showWill, showDid, hideWill, hideDid].forEach((s) => s.remove());
   }, []);
-  return visible;
+  return state;
 }
 
 export default function ChatScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<DrawerNavigationProp<Record<string, undefined>>>();
-  const keyboardVisible = useKeyboardVisible();
 
   const currentId = useUI((s) => s.currentId);
   const open = useUI((s) => s.open);
@@ -54,6 +61,26 @@ export default function ChatScreen() {
   const effortOpen = useUI((s) => s.effortOpen);
   const setEffortOpen = useUI((s) => s.setEffortOpen);
   const showEffort = effortOpen && !!effort;
+  const keyboard = useKeyboard();
+  const keyboardVisible = keyboard.visible;
+
+  // The slider lives in an over-keyboard layer (its own window on top of the IME), so the
+  // keyboard stays up underneath it, the veil paints across it, and every touch hits the
+  // layer's scrim instead of a key. If the system dismisses the keyboard anyway (back
+  // gesture), that layer can go down with it, so close the slider to match. The layer can
+  // itself make the IME blink on mount, so a dismissal right as it appears is ignored.
+  const overlayAppearedAt = useRef(0);
+  useEffect(() => {
+    if (!showEffort) return;
+    overlayAppearedAt.current = Date.now();
+    const hide = Keyboard.addListener('keyboardDidHide', () => {
+      if (Date.now() - overlayAppearedAt.current > 400) setEffortOpen(false);
+    });
+    return () => hide.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showEffort]);
+
+  const panelBottom = keyboardVisible ? keyboard.height + 8 : Math.max(insets.bottom, 8);
   const messages = conversation?.messages ?? [];
   const streaming = messages.some((m) => m.status === 'streaming');
 
@@ -118,15 +145,9 @@ export default function ChatScreen() {
             onAddEndpoint={() => router.push('/settings/endpoint')}
           />
         )}
-        {showEffort && (
-          <Pressable
-            style={[styles.scrim, { backgroundColor: colors.overlay }]}
-            onPress={() => setEffortOpen(false)}
-            accessibilityLabel="Close effort"
-          />
-        )}
         <View style={{ paddingBottom: bottomPad, paddingTop: 4 }}>
-          {/* Hidden rather than unmounted while the slider is up, so attached images survive. */}
+          {/* Hidden rather than unmounted while the slider is up, so attached images survive,
+              and untouchable as a backstop in case the overlay window mounts a beat late. */}
           <View style={showEffort && styles.hidden} pointerEvents={showEffort ? 'none' : 'auto'}>
             <Composer
               text={draft}
@@ -134,40 +155,80 @@ export default function ChatScreen() {
               streaming={streaming}
               onSend={send}
               onStop={() => currentId && stopStreaming(currentId)}
+              keyboardVisible={keyboardVisible}
               effort={effort ? { ...effort, onPress: () => setEffortOpen(true) } : undefined}
             />
           </View>
-          {showEffort && effort && (
-            <Animated.View
-              entering={FadeIn.duration(160)}
-              exiting={FadeOut.duration(120)}
-              style={[styles.effort, { bottom: bottomPad }]}
-            >
-              {/* Gradient veil so the label and slider sit on a clean backdrop over the
-                  dimmed content: fades to solid background just above the label and extends
-                  to the screen bottom, flush with both edges of the screen. */}
-              <View
-                pointerEvents="none"
-                style={[styles.veilSolid, { backgroundColor: colors.background, bottom: -bottomPad, top: -VEIL_CAP }]}
-              />
-              <Svg pointerEvents="none" style={[styles.veilFade, { top: -(VEIL_CAP + VEIL_FADE) }]}>
-                <Defs>
-                  <LinearGradient id="effortVeil" x1="0" y1="0" x2="0" y2="1">
-                    <Stop offset="0" stopColor={colors.background} stopOpacity={0} />
-                    <Stop offset="1" stopColor={colors.background} stopOpacity={1} />
-                  </LinearGradient>
-                </Defs>
-                <Rect x="0" y="0" width="100%" height="100%" fill="url(#effortVeil)" />
-              </Svg>
-              <EffortSlider
-                levels={effort.levels}
-                value={effort.level}
-                onChange={(level) => active && useSettings.getState().setEffort(active, level)}
-              />
-            </Animated.View>
-          )}
         </View>
       </KeyboardAvoidingView>
+
+      {/* The layer floats above the keyboard window, so the keyboard keeps showing under the
+          veil and stays untouched: every tap lands on this layer's scrim. */}
+      <OverKeyboardView visible={showEffort}>
+        <GestureHandlerRootView style={styles.overlay}>
+          {showEffort && (
+            // Transparent: it only catches taps. The veil gradients below do the visual work,
+            // so the header and content above the fade stay undimmed, as in ChatGPT.
+            <Pressable
+              style={styles.scrim}
+              onPress={() => setEffortOpen(false)}
+              accessibilityLabel="Close effort"
+            />
+          )}
+          {showEffort && effort && (
+            // A full-width column from the top of the fade to the screen bottom. Every veil
+            // piece lies inside it: Android dropped most of the pieces that used to hang
+            // outside the panel's bounds while the keyboard was up, leaving a strip at the left.
+            <Animated.View entering={FadeIn.duration(160)} pointerEvents="box-none" style={styles.effort}>
+              {/* Content fades out into solid background just above the label. */}
+              <View pointerEvents="none" style={styles.veilFade}>
+                <Svg width="100%" height="100%">
+                  <Defs>
+                    <LinearGradient id="effortVeil" x1="0" y1="0" x2="0" y2="1">
+                      {VEIL_EASE.map((o, i) => (
+                        <Stop key={i} offset={i / (VEIL_EASE.length - 1)} stopColor={colors.background} stopOpacity={o} />
+                      ))}
+                    </LinearGradient>
+                  </Defs>
+                  <Rect x="0" y="0" width="100%" height="100%" fill="url(#effortVeil)" />
+                </Svg>
+              </View>
+              {/* Solid behind the label and slider; without a keyboard it runs flush to the
+                  screen bottom. */}
+              <View
+                pointerEvents="box-none"
+                style={[
+                  styles.panel,
+                  { backgroundColor: colors.background, paddingBottom: keyboardVisible ? 0 : panelBottom },
+                ]}
+              >
+                <EffortSlider
+                  levels={effort.levels}
+                  value={effort.level}
+                  onChange={(level) => active && useSettings.getState().setEffort(active, level)}
+                />
+              </View>
+              {/* Over the keyboard the veil keeps going as a gradient — solid just below the
+                  slider, washing out toward the bottom of the screen so the keys emerge from
+                  it, as in ChatGPT. */}
+              {keyboardVisible && (
+                <View pointerEvents="none" style={{ height: panelBottom }}>
+                  <Svg width="100%" height="100%">
+                    <Defs>
+                      <LinearGradient id="effortVeilDown" x1="0" y1="0" x2="0" y2="1">
+                        {VEIL_EASE.map((o, i) => (
+                          <Stop key={i} offset={1 - i / (VEIL_EASE.length - 1)} stopColor={colors.background} stopOpacity={o} />
+                        )).reverse()}
+                      </LinearGradient>
+                    </Defs>
+                    <Rect x="0" y="0" width="100%" height="100%" fill="url(#effortVeilDown)" />
+                  </Svg>
+                </View>
+              )}
+            </Animated.View>
+          )}
+        </GestureHandlerRootView>
+      </OverKeyboardView>
 
       <ModelPicker visible={pickerOpen} onClose={() => setPickerOpen(false)} onManage={() => router.push('/settings')} />
     </View>
@@ -177,8 +238,10 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   hidden: { opacity: 0 },
+  // The overlay host is stretched to the full screen by its native side; children fill it.
+  overlay: { flex: 1 },
   scrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  effort: { position: 'absolute', left: 28, right: 28 },
-  veilSolid: { position: 'absolute', left: -28, right: -28 },
-  veilFade: { position: 'absolute', left: -28, right: -28, height: VEIL_FADE },
+  effort: { position: 'absolute', left: 0, right: 0, bottom: 0 },
+  veilFade: { height: VEIL_FADE },
+  panel: { paddingHorizontal: 28, paddingTop: VEIL_CAP },
 });
