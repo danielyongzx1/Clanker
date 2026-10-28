@@ -1,7 +1,7 @@
 import { router, useNavigation } from 'expo-router';
 import type { DrawerNavigationProp } from 'expo-router/drawer';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Keyboard, KeyboardAvoidingView, StyleSheet, View } from 'react-native';
+import { Alert, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChatHeader } from '@/components/ChatHeader';
 import { Composer } from '@/components/Composer';
@@ -91,7 +91,9 @@ export default function ChatScreen() {
         onNewChat={currentId ? () => open(null) : undefined}
       />
 
-      <KeyboardAvoidingView style={styles.container} behavior="padding">
+      {/* Android already resizes the window for the keyboard; padding on top of that pushes the
+          content up twice until the next layout pass snaps it back down. */}
+      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {messages.length > 0 ? (
           <MessageList messages={messages} onRegenerate={onRegenerate} />
         ) : (
