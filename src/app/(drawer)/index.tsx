@@ -18,6 +18,7 @@ import { ModelPicker } from '@/components/ModelPicker';
 import { regenerate, sendMessage, stopStreaming } from '@/lib/chat';
 import type { AttachmentPart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
+import { useContextUsage } from '@/lib/usage';
 import { useChats } from '@/store/chats';
 import { resolveEffort, useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
@@ -57,6 +58,8 @@ export default function ChatScreen() {
   const active = useSettings((s) => s.active);
   const hasEndpoint = useSettings((s) => s.endpoints.some((e) => e.models.length > 0));
   const effort = useSettings(useShallow((s) => resolveEffort(s, s.active)));
+  const showUsage = useSettings((s) => s.contextUsage);
+  const usage = useContextUsage(currentId, showUsage);
 
   const [draft, setDraft] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -180,6 +183,7 @@ export default function ChatScreen() {
               onStop={() => currentId && stopStreaming(currentId)}
               keyboardVisible={keyboardVisible}
               effort={effort ? { ...effort, onPress: () => setEffortOpen(true) } : undefined}
+              context={usage}
             />
           </Animated.View>
         </View>

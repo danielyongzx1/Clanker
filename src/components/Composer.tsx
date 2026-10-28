@@ -7,9 +7,11 @@ import Animated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withTi
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AttachmentMenu, type AttachAction } from '@/components/AttachmentMenu';
 import { attachmentUri, deleteAttachment, pickFiles, pickImages } from '@/lib/attachments';
+import { ContextMeter, ContextPopover } from '@/components/ContextUsage';
 import { EffortMeter } from '@/components/EffortMeter';
 import type { AttachmentPart, FilePart, ImagePart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
+import type { ContextUsage } from '@/lib/usage';
 
 // The composer is a one-line pill while the keyboard is down and a two-row box (text above,
 // toolbar below) while the keyboard is up. One progress value drives every dimension between
@@ -24,6 +26,8 @@ const TWEEN = { duration: 280, easing: Easing.bezier(0.2, 0, 0, 1) };
 const TOOLBAR_GAP = 4;
 // Height of the horizontal attachment strip (thumb row) added above the text: 12 + 64 + 2.
 const THUMB_ROW = 78;
+// Tap target around the context meter; it only takes room in the toolbar while expanded.
+const METER = 16;
 
 type Props = {
   text: string;
@@ -35,9 +39,11 @@ type Props = {
   keyboardVisible: boolean;
   /** Shown when the selected model takes an effort level. */
   effort?: { levels: string[]; level: string; onPress: () => void };
+  /** Shown beside the effort gauge while expanded, when context usage is turned on. */
+  context?: ContextUsage | null;
 };
 
-export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboardVisible, effort }: Props) {
+export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboardVisible, effort, context }: Props) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [attachments, setAttachments] = useState<AttachmentPart[]>([]);
@@ -51,10 +57,10 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
   const box = useRef<HostInstance>(null);
   const progress = useSharedValue(0);
 
-  // Attach popover: anchored to the box's top-left corner, measured at open time so it tracks
-  // the box wherever the keyboard has pushed it.
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [anchor, setAnchor] = useState({ x: TOOLBAR_PAD + 8, bottom: 96 });
+  // Popovers: the attach menu hangs off the box's top-left corner and the context breakdown off
+  // its top-right, measured at open time so they track the box wherever the keyboard pushed it.
+  const [popover, setPopover] = useState<'attach' | 'context' | null>(null);
+  const [anchor, setAnchor] = useState({ x: TOOLBAR_PAD + 8, right: COLLAPSED.margin, bottom: 96 });
   // Collapsed, the text runs up to the right-hand buttons, so leave room for the effort one too.
   const collapsedPadRight = COLLAPSED.padRight + (effort ? BUTTON + TOOLBAR_GAP : 0);
 
@@ -82,9 +88,15 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
     paddingLeft: interpolate(progress.value, [0, 1], [COLLAPSED.padLeft, EXPANDED.padLeft]),
     paddingRight: interpolate(progress.value, [0, 1], [collapsedPadRight, EXPANDED.padRight]),
   }));
+  // The meter grows in with the expanded toolbar; collapsed, it takes no room (its gap included).
+  const meterStyle = useAnimatedStyle(() => ({
+    width: interpolate(progress.value, [0, 1], [0, METER]),
+    marginRight: interpolate(progress.value, [0, 1], [-TOOLBAR_GAP, 0]),
+    opacity: progress.value,
+  }));
 
   const attach = async (source: AttachAction) => {
-    setMenuOpen(false);
+    setPopover(null);
     setImporting(true);
     try {
       const picked =
@@ -97,21 +109,26 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
     }
   };
 
-  // The popover floats above the box. With no keyboard it anchors where the box measures to
-  // sit; with the keyboard up the box will collapse to a known layout under the keyboard, so
-  // it anchors there while the keyboard retreats.
-  const openAttachMenu = () => {
+  // Popovers float above the box. With no keyboard they anchor where the box measures to sit;
+  // with the keyboard up the box will collapse to a known layout under the keyboard, so they
+  // anchor there while the keyboard retreats.
+  const openPopover = (which: 'attach' | 'context') => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (keyboardVisible) {
       const collapsedH = ROW + (attachments.length > 0 || importing ? THUMB_ROW : 0);
-      setAnchor({ x: COLLAPSED.margin + TOOLBAR_PAD, bottom: collapsedH + Math.max(insets.bottom, 8) + 8 });
+      setAnchor({
+        x: COLLAPSED.margin + TOOLBAR_PAD,
+        right: COLLAPSED.margin,
+        bottom: collapsedH + Math.max(insets.bottom, 8) + 8,
+      });
       Keyboard.dismiss();
-      setMenuOpen(true);
+      setPopover(which);
       return;
     }
-    box.current?.measureInWindow((x, y) => {
-      setAnchor({ x: x + TOOLBAR_PAD, bottom: Dimensions.get('window').height - y + 8 });
-      setMenuOpen(true);
+    box.current?.measureInWindow((x, y, width) => {
+      const window = Dimensions.get('window');
+      setAnchor({ x: x + TOOLBAR_PAD, right: window.width - x - width, bottom: window.height - y + 8 });
+      setPopover(which);
     });
   };
 
@@ -131,12 +148,21 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
   return (
     <>
       <AttachmentMenu
-        visible={menuOpen}
+        visible={popover === 'attach'}
         x={anchor.x}
         bottom={anchor.bottom}
         onPick={attach}
-        onClose={() => setMenuOpen(false)}
+        onClose={() => setPopover(null)}
       />
+      {context && (
+        <ContextPopover
+          visible={popover === 'context'}
+          usage={context}
+          right={anchor.right}
+          bottom={anchor.bottom}
+          onClose={() => setPopover(null)}
+        />
+      )}
       <Animated.View ref={box} style={[styles.box, { backgroundColor: colors.composer }, boxStyle]}>
         {(attachments.length > 0 || importing) && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbs}>
@@ -190,7 +216,7 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
       {/* Pinned to the bottom row: beside the text when collapsed, below it when expanded. */}
       <View style={styles.toolbar} pointerEvents="box-none">
         <Pressable
-          onPress={openAttachMenu}
+          onPress={() => openPopover('attach')}
           hitSlop={6}
           style={({ pressed }) => [styles.circle, pressed && { opacity: 0.5 }]}
           accessibilityLabel="Attach"
@@ -199,6 +225,20 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
         </Pressable>
 
         <View style={styles.trailing}>
+          {context && (
+            <Animated.View style={[styles.meterSlot, meterStyle]} pointerEvents={keyboardVisible ? 'auto' : 'none'}>
+              <Pressable
+                onPress={() => openPopover('context')}
+                hitSlop={{ top: 8, bottom: 8, left: 10, right: 6 }}
+                style={({ pressed }) => [styles.meterButton, pressed && { opacity: 0.5 }]}
+                accessibilityLabel={`Context: ${Math.round(
+                  ((context.system + context.tools + context.messages) / context.budget) * 100
+                )}% used`}
+              >
+                <ContextMeter usage={context} />
+              </Pressable>
+            </Animated.View>
+          )}
           {effort && (
             <Pressable
               onPress={effort.onPress}
@@ -282,6 +322,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: TOOLBAR_PAD,
   },
   trailing: { flexDirection: 'row', alignItems: 'center', gap: TOOLBAR_GAP },
+  meterSlot: { height: BUTTON, overflow: 'hidden' },
+  meterButton: { width: METER, height: BUTTON, alignItems: 'center', justifyContent: 'center' },
   circle: { width: BUTTON, height: BUTTON, borderRadius: BUTTON / 2, alignItems: 'center', justifyContent: 'center' },
   stop: { width: 12, height: 12, borderRadius: 2 },
 });

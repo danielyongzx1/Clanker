@@ -26,6 +26,10 @@ export function describeCall(name: string, input: Record<string, unknown>) {
       return p('job_id') ? `Check job ${p('job_id')}` : 'List background jobs';
     case 'job_kill':
       return `Stop job ${p('job_id')}`;
+    case 'web_search':
+      return `Search web “${p('query')}”`;
+    case 'web_fetch':
+      return `${p('save_as') ? 'Download' : 'Fetch'} ${p('url').replace(/^https?:\/\/(www\.)?/, '')}`;
     case 'compress': {
       const ranges = Array.isArray(input.ranges) ? (input.ranges as { from?: unknown; to?: unknown }[]) : [];
       const labels = ranges.map((r) => (r.to && r.to !== r.from ? `${r.from}–${r.to}` : String(r.from)));

@@ -53,6 +53,7 @@ export default function RootLayout() {
               <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
               <Stack.Screen name="settings/endpoint" options={{ presentation: 'modal', title: 'Endpoint' }} />
               <Stack.Screen name="settings/workspace" options={{ title: 'Workspace' }} />
+              <Stack.Screen name="settings/search" options={{ title: 'Web search' }} />
             </Stack>
             {toolsOn && <ScriptRuntime />}
           </ThemeProvider>

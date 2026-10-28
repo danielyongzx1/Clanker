@@ -26,7 +26,7 @@ const IMAGE_TOKENS = 1500;
 // Providers that take binary non-image attachments inline (PDFs and the like).
 const BINARY_FILE_PROVIDERS: ProviderType[] = ['anthropic', 'gemini'];
 
-const tokensOf = (s: string) => Math.ceil(s.length / CHARS_PER_TOKEN);
+export const tokensOf = (s: string) => Math.ceil(s.length / CHARS_PER_TOKEN);
 
 export function formatTokens(n: number) {
   if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(2)}M`;

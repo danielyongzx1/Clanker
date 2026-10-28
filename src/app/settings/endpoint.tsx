@@ -1,18 +1,8 @@
 import Feather from '@expo/vector-icons/Feather';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  type TextInputProps,
-} from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Chip, Input, Label } from '@/components/Form';
 import {
   getAdapter,
   guessEfforts,
@@ -42,39 +32,6 @@ function parseHeaders(text: string) {
     if (i > 0) headers[line.slice(0, i).trim()] = line.slice(i + 1).trim();
   }
   return headers;
-}
-
-function Label({ children }: { children: ReactNode }) {
-  const { colors } = useTheme();
-  return <Text style={[styles.label, { color: colors.textSecondary }]}>{children}</Text>;
-}
-
-function Input(props: TextInputProps) {
-  const { colors } = useTheme();
-  return (
-    <TextInput
-      placeholderTextColor={colors.textTertiary}
-      autoCapitalize="none"
-      autoCorrect={false}
-      {...props}
-      style={[styles.input, { color: colors.text, backgroundColor: colors.surface }, props.style]}
-    />
-  );
-}
-
-function Chip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
-  const { colors } = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[
-        styles.chip,
-        { borderColor: selected ? colors.text : colors.border, backgroundColor: selected ? colors.surface : 'transparent' },
-      ]}
-    >
-      <Text style={{ color: colors.text, fontSize: 14, fontWeight: selected ? '600' : '400' }}>{label}</Text>
-    </Pressable>
-  );
 }
 
 export default function EndpointScreen() {
@@ -490,11 +447,8 @@ export default function EndpointScreen() {
 
 const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 60 },
-  label: { fontSize: 13, fontWeight: '500', marginTop: 20, marginBottom: 8, marginLeft: 4 },
-  input: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16 },
   hint: { fontSize: 13, lineHeight: 18, marginTop: 6, marginHorizontal: 4 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   eye: { position: 'absolute', right: 14, top: 0, bottom: 0, justifyContent: 'center' },
   modelsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
   inlineButton: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },

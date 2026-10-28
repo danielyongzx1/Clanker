@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { PROVIDER_LABELS } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
+import { SEARCH_PROVIDERS } from '@/lib/tools/web';
 import { useSettings, type ThemePreference } from '@/store/settings';
 
 function Section({ title, children, footer }: { title: string; children: ReactNode; footer?: string }) {
@@ -31,6 +32,11 @@ export default function SettingsScreen() {
   const setTheme = useSettings((s) => s.setTheme);
   const tools = useSettings((s) => s.tools);
   const setTools = useSettings((s) => s.setTools);
+  const web = useSettings((s) => s.web);
+  const setWeb = useSettings((s) => s.setWeb);
+  const searchProvider = useSettings((s) => s.search.provider);
+  const contextUsage = useSettings((s) => s.contextUsage);
+  const setContextUsage = useSettings((s) => s.setContextUsage);
 
   return (
     <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={styles.content}>
@@ -74,13 +80,33 @@ export default function SettingsScreen() {
         title="AGENT"
         footer={`Lets models read and write files of any type in a private workspace and run Python and JavaScript${
           Platform.OS === 'android' ? ' and shell commands' : ''
-        } on this phone. Turn off for models that don't support tool calling.`}
+        } on this phone, and search and read the web. Turn off for models that don't support tool calling.`}
       >
         <View style={styles.row}>
           <Feather name="tool" size={18} color={colors.textSecondary} />
           <Text style={[styles.rowTitle, { color: colors.text, flex: 1 }]}>File & code tools</Text>
           <Switch value={tools} onValueChange={setTools} />
         </View>
+        <View style={[styles.row, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+          <Feather name="globe" size={18} color={colors.textSecondary} />
+          <Text style={[styles.rowTitle, { color: colors.text, flex: 1 }]}>Web search & fetch</Text>
+          <Switch value={web} onValueChange={setWeb} disabled={!tools} />
+        </View>
+        {web && tools && (
+          <Pressable
+            onPress={() => router.push('/settings/search')}
+            style={({ pressed }) => [
+              styles.row,
+              { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+              pressed && { backgroundColor: colors.surfaceHover },
+            ]}
+          >
+            <Feather name="search" size={18} color={colors.textSecondary} />
+            <Text style={[styles.rowTitle, { color: colors.text, flex: 1 }]}>Search provider</Text>
+            <Text style={[styles.rowDetail, { color: colors.textTertiary, marginTop: 0 }]}>{SEARCH_PROVIDERS[searchProvider].label}</Text>
+            <Feather name="chevron-right" size={18} color={colors.textTertiary} />
+          </Pressable>
+        )}
         <Pressable
           onPress={() => router.push('/settings/workspace')}
           style={({ pressed }) => [
@@ -93,6 +119,17 @@ export default function SettingsScreen() {
           <Text style={[styles.rowTitle, { color: colors.text, flex: 1 }]}>Workspace files</Text>
           <Feather name="chevron-right" size={18} color={colors.textTertiary} />
         </Pressable>
+      </Section>
+
+      <Section
+        title="CONTEXT"
+        footer="Shows a meter beside the effort gauge while you type. Tap it to see what is using the model's context budget, which you set per model on its endpoint."
+      >
+        <View style={styles.row}>
+          <Feather name="bar-chart-2" size={18} color={colors.textSecondary} />
+          <Text style={[styles.rowTitle, { color: colors.text, flex: 1 }]}>Show context usage</Text>
+          <Switch value={contextUsage} onValueChange={setContextUsage} />
+        </View>
       </Section>
 
       <Section title="APPEARANCE">

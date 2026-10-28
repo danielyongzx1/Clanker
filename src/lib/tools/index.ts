@@ -1,5 +1,6 @@
 import { Directory, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
+import { useSettings } from '@/store/settings';
 import { ClankerShell } from '../../../modules/clanker-shell';
 import { importAsset } from '../attachments';
 import { compress, contextStatus, decompress, searchContext } from '../context';
@@ -13,6 +14,7 @@ import {
   ensureWorkspace,
   fileAt,
   formatSize,
+  freePath,
   normalizePath,
   walk,
   workspacePath,
@@ -21,6 +23,7 @@ import {
 import { describeCall } from './describe';
 import { extractZipDocument, ZIP_DOCUMENT_EXT } from './documents';
 import { forgetObserved, isObserved, markObserved, requireObserved } from './observe';
+import { download, htmlToMarkdown, searchWeb } from './web';
 
 export type ToolOutcome = {
   output: string;
@@ -634,6 +637,101 @@ const jobKill: Tool = {
   },
 };
 
+// ---- web -----------------------------------------------------------------------------------
+
+// Text pages are returned this many characters at a time.
+const WEB_PAGE_CHARS = 20_000;
+const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+const TEXT_TYPE = /^text\/|[+/](json|xml|javascript|ecmascript|yaml|csv|markdown)$/;
+
+const webSearch: Tool = {
+  name: 'web_search',
+  description:
+    'Search the web. Returns titles, URLs and snippets; open the promising results with web_fetch before relying on their details. ' +
+    'Use it for current events, prices, documentation, niche facts and anything you are unsure of or that may have changed since your training.',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'What to search for, phrased as you would in a search engine.' },
+      count: { type: 'integer', description: 'How many results, 1-20. Default 8.' },
+    },
+    required: ['query'],
+  },
+  async run(input, { signal }) {
+    const query = str(input.query, 'query');
+    const count = Math.min(20, Math.max(1, Number(input.count) || 8));
+    const results = await searchWeb(query, count, signal);
+    if (!results.length) return { output: `No results for “${query}”.` };
+    return {
+      output: clip(
+        results
+          .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}${r.date ? ` · ${r.date}` : ''}${r.snippet ? `\n   ${r.snippet}` : ''}`)
+          .join('\n\n')
+      ),
+    };
+  },
+};
+
+const webFetch: Tool = {
+  name: 'web_fetch',
+  description:
+    'Fetch a URL (http or https). Web pages come back as markdown with their links; long ones come in parts, so pass start to read on. ' +
+    'Files that are not text (PDFs, images, Office documents, archives, ...) are saved to the workspace under downloads/, to open with read_file or a script. ' +
+    'Pass save_as to save any response, text included, to a workspace path instead of reading it.',
+  parameters: {
+    type: 'object',
+    properties: {
+      url: { type: 'string' },
+      start: { type: 'integer', description: 'Character offset to read from, for pages longer than one result. Default 0.' },
+      raw: { type: 'boolean', description: 'Return HTML source instead of converting it to markdown. Default false.' },
+      save_as: { type: 'string', description: 'Workspace path to save the response to.' },
+    },
+    required: ['url'],
+  },
+  async run(input, { conversationId, signal }) {
+    const url = str(input.url, 'url').trim();
+    if (!/^https?:\/\//i.test(url)) throw new ToolError('Only http and https URLs can be fetched.');
+    const saveAs = input.save_as ? normalizePath(str(input.save_as, 'save_as')) : '';
+    if (saveAs) {
+      if (dirAt(saveAs).exists) throw new ToolError(`"${saveAs}" is a folder.`);
+      requireObserved(conversationId, saveAs, 'overwrite');
+    }
+    const res = await download(url, signal, MAX_DOWNLOAD_BYTES, saveAs ? 300_000 : 60_000);
+    const textual =
+      !saveAs && res.bytes.length <= MAX_TEXT_BYTES && (TEXT_TYPE.test(res.type) || (!res.type && !isBinary(res.bytes)));
+
+    if (!textual) {
+      if (!res.ok) throw new ToolError(`HTTP ${res.status} from ${res.url}.`);
+      const path = saveAs || freePath(res.filename, 'downloads');
+      ensureParent(path);
+      const file = fileAt(path);
+      await file.write(res.bytes);
+      return {
+        output: `Saved ${res.url} to ${path} (${formatSize(file.size)}${res.type ? `, ${res.type}` : ''}).${
+          saveAs ? '' : ' Open it with read_file, or process it with a script.'
+        }`,
+        files: [path],
+      };
+    }
+
+    let text = new TextDecoder().decode(res.bytes);
+    let title = '';
+    const html = /html/.test(res.type) || (!res.type && /^\s*<(!doctype html|html)/i.test(text));
+    if (html && !input.raw) ({ title, text } = htmlToMarkdown(text, res.url));
+    const start = Math.max(0, Number(input.start) || 0);
+    const page = text.slice(start, start + WEB_PAGE_CHARS);
+    const end = start + page.length;
+    const header = [
+      title && `# ${title}`,
+      `URL: ${res.url}`,
+      !res.ok && `HTTP ${res.status}`,
+      (start > 0 || end < text.length) &&
+        `[Characters ${start}-${end} of ${text.length}.${end < text.length ? ` Pass start=${end} to read on.` : ''}]`,
+    ].filter(Boolean);
+    return { output: `${header.join('\n')}\n\n${page || '[no text]'}`, isError: !res.ok };
+  },
+};
+
 // ---- context management --------------------------------------------------------------------
 
 const scopeOf = (ctx: ToolContext) => ({ conversationId: ctx.conversationId, replyId: ctx.messageId, step: ctx.step });
@@ -717,6 +815,8 @@ const TOOLS: Tool[] = [
   runShell,
   jobOutput,
   jobKill,
+  webSearch,
+  webFetch,
   compressTool,
   decompressTool,
   searchContextTool,
@@ -725,9 +825,17 @@ const TOOLS: Tool[] = [
 
 export const shellAvailable = () => Platform.OS === 'android' && !!ClankerShell;
 
+export const webEnabled = () => useSettings.getState().web;
+
+function enabled(tool: Tool) {
+  if (tool === runShell) return shellAvailable();
+  if (tool === webSearch || tool === webFetch) return webEnabled();
+  return true;
+}
+
 /** Tools offered to the model on this device. */
 export function availableTools(): ToolSpec[] {
-  return TOOLS.filter((t) => t !== runShell || shellAvailable()).map(({ name, description, parameters }) => ({
+  return TOOLS.filter(enabled).map(({ name, description, parameters }) => ({
     name,
     description,
     parameters,
@@ -736,7 +844,7 @@ export function availableTools(): ToolSpec[] {
 
 export async function executeTool(call: ToolCall, ctx: Omit<ToolContext, 'callId'>): Promise<ToolOutcome> {
   const tool = TOOLS.find((t) => t.name === call.name);
-  if (!tool || (tool === runShell && !shellAvailable())) {
+  if (!tool || !enabled(tool)) {
     return { output: `Unknown tool "${call.name}".`, isError: true };
   }
   if ('_raw' in call.input) {

@@ -22,6 +22,8 @@ const ICONS: Record<string, keyof typeof Feather.glyphMap> = {
   run_shell: 'terminal',
   job_output: 'clock',
   job_kill: 'x-octagon',
+  web_search: 'globe',
+  web_fetch: 'link',
   compress: 'minimize-2',
   decompress: 'maximize-2',
   search_context: 'search',

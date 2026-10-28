@@ -7,6 +7,11 @@ export type ThemePreference = 'system' | 'light' | 'dark';
 
 export type ModelRef = { endpointId: string; model: string };
 
+export type SearchProvider = 'duckduckgo' | 'brave' | 'tavily' | 'searxng';
+
+/** Where web_search sends queries. Keys live in SecureStore under `search-<provider>`. */
+export type SearchConfig = { provider: SearchProvider; /** SearXNG instance URL. */ url?: string };
+
 // Hosted APIs whose current models all have windows of 128K tokens or more, though not every one reports it.
 const LARGE_CONTEXT_HOSTS = /api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com|api\.deepseek\.com|api\.mistral\.ai|api\.x\.ai/i;
 
@@ -22,12 +27,20 @@ interface SettingsState {
   efforts: Record<string, string>;
   /** Whether models get the file, script and shell tools. */
   tools: boolean;
+  /** Whether the composer shows a context usage meter while typing. */
+  contextUsage: boolean;
+  /** Whether models with tools also get web search and fetch. */
+  web: boolean;
+  search: SearchConfig;
   upsertEndpoint: (endpoint: Endpoint) => void;
   removeEndpoint: (id: string) => void;
   setActive: (ref: ModelRef) => void;
   setTheme: (theme: ThemePreference) => void;
   setEffort: (ref: ModelRef, level: string) => void;
   setTools: (on: boolean) => void;
+  setContextUsage: (on: boolean) => void;
+  setWeb: (on: boolean) => void;
+  setSearch: (search: SearchConfig) => void;
 }
 
 export const useSettings = create<SettingsState>()(
@@ -38,6 +51,9 @@ export const useSettings = create<SettingsState>()(
       theme: 'system',
       efforts: {},
       tools: true,
+      contextUsage: false,
+      web: true,
+      search: { provider: 'duckduckgo' },
       upsertEndpoint: (endpoint) => {
         const exists = get().endpoints.some((e) => e.id === endpoint.id);
         const endpoints = exists
@@ -64,6 +80,9 @@ export const useSettings = create<SettingsState>()(
       setTheme: (theme) => set({ theme }),
       setEffort: (ref, level) => set({ efforts: { ...get().efforts, [effortKey(ref)]: level } }),
       setTools: (tools) => set({ tools }),
+      setContextUsage: (contextUsage) => set({ contextUsage }),
+      setWeb: (web) => set({ web }),
+      setSearch: (search) => set({ search }),
     }),
     {
       name: 'settings',
