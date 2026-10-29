@@ -1,0 +1,64 @@
+# Clanker 1.1.0
+
+## Clanker can use your phone
+- New **phone tools**: Clanker opens apps, reads what's on screen, and taps, types, scrolls and swipes for you — filling a form or walking through another app while you watch
+- Driven through an Android **accessibility service**: turn on Clanker phone control in Android's settings, then enable the tools in Settings → Tools
+- The model works in small steps — open, look, act, check — and a **Stop** button stays on screen the whole time, so you can take the phone back at any moment
+
+## Know when replies finish
+- Clanker now **sends a notification when a reply finishes** while it's in the background — long agent tasks and phone control keep going after you switch away
+- Tapping the notification opens that chat, even from another app or a cold start; failures are announced too, so nothing dies quietly while you're away
+- Permission is asked for the first time a reply finishes, only if you've never answered, and one notification per chat replaces the last
+
+## Updates without the browser
+- Clanker checks GitHub once a day and offers to **download and install** new versions in-app (Android); watch progress in Settings → Updates, or trigger a check yourself
+
+## Connecting
+- Endpoints can list **alternative base URLs**: Clanker probes them and talks through whichever answers first — a LAN address at home, a public one elsewhere
+
+## Smaller things
+- Optional **decode speed** and **cache hit** stats under replies, averaged over the last 10 responses
+- New **Generate titles** toggle in Settings
+- Refreshed app icon and splash image
+
+**Install:** download the APK below and open it. Phone control additionally needs the accessibility permission granted in Android settings.
+
+---
+
+# Clanker 1.0.0
+
+The first release of Clanker: a chat app for Android that talks to your own AI endpoints instead of a single provider.
+
+## Bring your own models
+- Connect any **OpenAI-compatible** API (OpenAI, OpenRouter, LM Studio, Groq, ...), **Anthropic**, **Ollama** or **Google Gemini**
+- Local servers on your network work too, including plain HTTP
+- Switch models from any chat, with per-model effort levels for reasoning models
+- API keys stay in the device keychain
+
+## Chat
+- Streaming replies with stop and regenerate
+- Markdown with syntax-highlighted code and scrollable tables
+- Image and file attachments for vision models
+- Send while a reply is running: queue messages for later, or steer the reply mid-task
+- Auto-generated titles, search, rename, pin, archive and delete
+- Optional context meter, decode speed and cache-hit stats
+
+## Agent tools
+- A private workspace per chat for reading, writing and editing files
+- Reads PDF, Word, Excel, PowerPoint, OpenDocument and EPUB files
+- Runs **Python** (with pandas, matplotlib, python-docx and more) and **JavaScript** on the phone
+- Runs shell commands with the phone's built-in utilities
+- Web search (Firecrawl, DuckDuckGo, Exa, Brave, Tavily or SearXNG) and page reading
+- Files the agent creates show up under its reply: tap to open, long-press to share
+
+## Long chats
+- Models compress their own history to stay inside the context window, and can restore it later
+- Automatic compression when a chat nears its context budget, adjustable in Settings
+
+## Memory and projects
+- Clanker remembers facts about you across chats; view and edit them in Settings → Memory
+- Temporary chats that don't use or save memories
+- Projects group chats with a shared workspace, source files, instructions and optional project-only memory
+
+## Install
+Download `app-release.apk` below and open it. Android will ask you to allow installs from your browser or file manager the first time.
