@@ -849,6 +849,8 @@ const contextStatusTool: Tool = {
   },
 };
 
+const BACKGROUND_TOOLS = [runPython.name, runJavaScript.name, runShell.name];
+
 const TOOLS: Tool[] = [
   listFiles,
   readFile,
@@ -875,17 +877,31 @@ export const shellAvailable = () => Platform.OS === 'android' && !!ClankerShell;
 export const webEnabled = () => useSettings.getState().web;
 
 function enabled(tool: Tool) {
+  if (useSettings.getState().disabledTools.includes(tool.name)) return false;
   if (tool === runShell) return shellAvailable();
   if (tool === webSearch || tool === webFetch) return webEnabled();
   return true;
 }
 
+/** Whether the model is offered the named tool. */
+export const toolOn = (name: string) => TOOLS.some((t) => t.name === name && enabled(t));
+
+// Without the job tools a background job's result could never be collected, so the run tools
+// lose their background option.
+const jobsOn = () => toolOn('job_output');
+
+function withoutBackground(parameters: Tool['parameters']) {
+  const { background: _, ...properties } = parameters.properties as Record<string, unknown>;
+  return { ...parameters, properties };
+}
+
 /** Tools offered to the model on this device. */
 export function availableTools(): ToolSpec[] {
+  const jobs = jobsOn();
   return TOOLS.filter(enabled).map(({ name, description, parameters }) => ({
     name,
     description,
-    parameters,
+    parameters: jobs || !BACKGROUND_TOOLS.includes(name) ? parameters : withoutBackground(parameters),
   }));
 }
 
@@ -898,7 +914,8 @@ export async function executeTool(call: ToolCall, ctx: Omit<ToolContext, 'callId
     return { output: `The arguments were not valid JSON: ${String(call.input._raw).slice(0, 500)}`, isError: true };
   }
   try {
-    const outcome = await tool.run(call.input, { ...ctx, callId: call.id });
+    const input = jobsOn() ? call.input : { ...call.input, background: undefined };
+    const outcome = await tool.run(input, { ...ctx, callId: call.id });
     if (!outcome.isError) {
       // What the model has now seen as it is: anything it read, and anything it or its scripts wrote.
       const read = call.name === 'read_file' && typeof call.input.path === 'string' ? [call.input.path] : [];

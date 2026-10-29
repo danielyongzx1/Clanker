@@ -7,6 +7,11 @@ export type ThemePreference = 'system' | 'light' | 'dark';
 
 export type ModelRef = { endpointId: string; model: string };
 
+/** When history is compressed on its own, as percentages of the model's context budget. */
+export type CompressionConfig = { trigger: number; target: number };
+
+export const COMPRESSION_DEFAULTS: CompressionConfig = { trigger: 60, target: 30 };
+
 export type SearchProvider = 'firecrawl' | 'duckduckgo' | 'exa' | 'brave' | 'tavily' | 'searxng';
 
 /** Where web_search sends queries. Keys live in SecureStore under `search-<provider>`. */
@@ -27,20 +32,25 @@ interface SettingsState {
   efforts: Record<string, string>;
   /** Whether models get the file, script and shell tools. */
   tools: boolean;
+  /** Tools the user turned off one by one, by name. */
+  disabledTools: string[];
   /** Whether the composer shows a context usage meter while typing. */
   contextUsage: boolean;
   /** Whether models with tools also get web search and fetch. */
   web: boolean;
   search: SearchConfig;
+  compression: CompressionConfig;
   upsertEndpoint: (endpoint: Endpoint) => void;
   removeEndpoint: (id: string) => void;
   setActive: (ref: ModelRef) => void;
   setTheme: (theme: ThemePreference) => void;
   setEffort: (ref: ModelRef, level: string) => void;
   setTools: (on: boolean) => void;
+  setToolsEnabled: (names: string[], on: boolean) => void;
   setContextUsage: (on: boolean) => void;
   setWeb: (on: boolean) => void;
   setSearch: (search: SearchConfig) => void;
+  setCompression: (compression: CompressionConfig) => void;
 }
 
 export const useSettings = create<SettingsState>()(
@@ -51,9 +61,11 @@ export const useSettings = create<SettingsState>()(
       theme: 'system',
       efforts: {},
       tools: true,
+      disabledTools: [],
       contextUsage: false,
       web: true,
       search: { provider: 'firecrawl' },
+      compression: COMPRESSION_DEFAULTS,
       upsertEndpoint: (endpoint) => {
         const exists = get().endpoints.some((e) => e.id === endpoint.id);
         const endpoints = exists
@@ -80,14 +92,19 @@ export const useSettings = create<SettingsState>()(
       setTheme: (theme) => set({ theme }),
       setEffort: (ref, level) => set({ efforts: { ...get().efforts, [effortKey(ref)]: level } }),
       setTools: (tools) => set({ tools }),
+      setToolsEnabled: (names, on) => {
+        const rest = get().disabledTools.filter((n) => !names.includes(n));
+        set({ disabledTools: on ? rest : [...rest, ...names] });
+      },
       setContextUsage: (contextUsage) => set({ contextUsage }),
       setWeb: (web) => set({ web }),
       setSearch: (search) => set({ search }),
+      setCompression: (compression) => set({ compression }),
     }),
     {
       name: 'settings',
       storage: jsonFileStorage,
-      version: 1,
+      version: 2,
       migrate: (persisted, version) => {
         const state = persisted as SettingsState & { contextBudget?: number };
         // v0 had one budget for every model whose window wasn't known; keep it on those models.
@@ -101,6 +118,10 @@ export const useSettings = create<SettingsState>()(
           });
         }
         delete state.contextBudget;
+        // v1 defaulted to compressing at 90% down to 60%; settings left at that move to the new defaults.
+        if (version < 2 && state.compression?.trigger === 90 && state.compression.target === 60) {
+          state.compression = COMPRESSION_DEFAULTS;
+        }
         return state;
       },
     }

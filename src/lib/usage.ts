@@ -16,6 +16,7 @@ export function useContextUsage(conversationId: string | null, enabled: boolean)
   const endpoint = useSettings((s) => s.endpoints.find((e) => e.id === s.active?.endpointId));
   const model = useSettings((s) => s.active?.model);
   const withTools = useSettings((s) => s.tools);
+  const disabledTools = useSettings((s) => s.disabledTools);
   const conversation = useChats((s) => (conversationId ? s.conversations[conversationId] : undefined));
   const budget = endpoint && model ? resolveBudget(endpoint, model) : null;
 
@@ -24,13 +25,14 @@ export function useContextUsage(conversationId: string | null, enabled: boolean)
   // Refreshed when a message starts or a reply ends (the web and shell tools can come and go),
   // not on every streamed token.
   const overhead = useMemo(() => {
-    if (!enabled || !budget || !withTools) return { system: 0, tools: 0 };
+    const tools = enabled && budget && withTools ? availableTools() : [];
+    if (!tools.length) return { system: 0, tools: 0 };
     return {
       system: tokensOf(agentSystemPrompt()),
-      tools: tokensOf(JSON.stringify(availableTools())),
+      tools: tokensOf(JSON.stringify(tools)),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, budget, withTools, conversationId, replyId, count]);
+  }, [enabled, budget, withTools, disabledTools, conversationId, replyId, count]);
 
   const messages = useMemo(() => {
     if (!enabled || !conversation) return 0;

@@ -240,7 +240,7 @@ export async function searchWeb(
       keyUse === 'required' && !key ? 'no API key is set' : provider === 'searxng' && !config.url?.trim() ? 'no URL is set' : null;
     if (missing) {
       // Providers the user hasn't set up are skipped quietly, unless they are the chosen one.
-      if (provider === config.provider) failures.push(`${label}: ${missing} (Settings → Web search).`);
+      if (provider === config.provider) failures.push(`${label}: ${missing} (Settings → Web access).`);
       continue;
     }
     try {

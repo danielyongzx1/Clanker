@@ -1,7 +1,7 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Appearance } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -10,10 +10,20 @@ import { ScriptRuntime } from '@/components/ScriptRuntime';
 import { useTheme } from '@/lib/theme';
 import { useSettings } from '@/store/settings';
 
+const RUNTIME_DELAY = 600;
+
 export default function RootLayout() {
   const themePreference = useSettings((s) => s.theme);
   const toolsOn = useSettings((s) => s.tools);
   const { scheme, colors } = useTheme();
+
+  // Creating or tearing down the runtime's WebView stalls the UI thread, so when the setting
+  // changes it waits until the switch in Settings has finished animating.
+  const [runtimeOn, setRuntimeOn] = useState(toolsOn);
+  useEffect(() => {
+    const timer = setTimeout(() => setRuntimeOn(toolsOn), RUNTIME_DELAY);
+    return () => clearTimeout(timer);
+  }, [toolsOn]);
 
   useEffect(() => {
     Appearance.setColorScheme(themePreference === 'system' ? 'unspecified' : themePreference);
@@ -53,9 +63,11 @@ export default function RootLayout() {
               <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
               <Stack.Screen name="settings/endpoint" options={{ presentation: 'modal', title: 'Endpoint' }} />
               <Stack.Screen name="settings/workspace" options={{ title: 'Workspace' }} />
-              <Stack.Screen name="settings/search" options={{ title: 'Web search' }} />
+              <Stack.Screen name="settings/tools" options={{ title: 'Files & code' }} />
+              <Stack.Screen name="settings/context" options={{ title: 'Auto-compression' }} />
+              <Stack.Screen name="settings/search" options={{ title: 'Web access' }} />
             </Stack>
-            {toolsOn && <ScriptRuntime />}
+            {runtimeOn && <ScriptRuntime />}
           </ThemeProvider>
         </SafeAreaProvider>
       </KeyboardProvider>

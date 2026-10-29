@@ -6,12 +6,11 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { formatTokens } from '@/lib/context';
 import { useTheme, type Colors } from '@/lib/theme';
 import type { ContextUsage } from '@/lib/usage';
+import { useSettings } from '@/store/settings';
 
 // Same motion as the attach menu: a quick ease-out in, a shorter exit.
 const ENTER = { duration: 220, easing: Easing.bezier(0.23, 1, 0.32, 1) };
 const EXIT = { duration: 140, easing: Easing.bezier(0.3, 0, 0.8, 0.6) };
-// Past this share of the budget the app starts compressing history on its own.
-const WARN_PERCENT = 90;
 const TOOLS_COLOR = '#A78BFA';
 const CARD_WIDTH = 320;
 
@@ -28,6 +27,7 @@ function parts(u: ContextUsage, colors: Colors) {
 /** Thin vertical gauge that fills from the bottom as the chat uses up the model's budget. */
 export function ContextMeter({ usage }: { usage: ContextUsage }) {
   const { colors } = useTheme();
+  const warnPercent = useSettings((s) => s.compression.trigger);
   const frac = totalOf(usage) / usage.budget;
   return (
     <View style={styles.meter}>
@@ -35,7 +35,7 @@ export function ContextMeter({ usage }: { usage: ContextUsage }) {
       <View
         style={[
           styles.meterFill,
-          { height: `${Math.min(1, frac) * 100}%`, backgroundColor: frac * 100 >= WARN_PERCENT ? colors.danger : colors.accent },
+          { height: `${Math.min(1, frac) * 100}%`, backgroundColor: frac * 100 >= warnPercent ? colors.danger : colors.accent },
         ]}
       />
     </View>
@@ -58,6 +58,8 @@ type PopoverProps = {
 export function ContextPopover({ visible, usage, right, bottom, onClose }: PopoverProps) {
   const { colors } = useTheme();
   const reduceMotion = useReducedMotion();
+  // Past this share of the budget the app starts compressing history on its own.
+  const warnPercent = useSettings((s) => s.compression.trigger);
   const [mounted, setMounted] = useState(visible);
   if (visible && !mounted) setMounted(true);
 
@@ -118,7 +120,7 @@ export function ContextPopover({ visible, usage, right, bottom, onClose }: Popov
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.header}>
             <Text style={[styles.headerText, { color: colors.textSecondary }]}>
-              <Text style={{ color: percent >= WARN_PERCENT ? colors.danger : colors.text, fontWeight: '700' }}>
+              <Text style={{ color: percent >= warnPercent ? colors.danger : colors.text, fontWeight: '700' }}>
                 {percent}%
               </Text>
               {'  '}of context used
@@ -148,7 +150,7 @@ export function ContextPopover({ visible, usage, right, bottom, onClose }: Popov
           ))}
 
           <Text style={[styles.note, { color: colors.textTertiary }]}>
-            Rough estimate against this model&apos;s budget. Past {WARN_PERCENT}%, older history is compressed
+            Rough estimate against this model&apos;s budget. Past {warnPercent}%, older history is compressed
             automatically.
           </Text>
         </View>

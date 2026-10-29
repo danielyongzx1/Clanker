@@ -1,19 +1,25 @@
 import Feather from '@expo/vector-icons/Feather';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Chip, Input, Label } from '@/components/Form';
+import { Input, Label, Row, Section, ToggleRow } from '@/components/Form';
 import { apiKeys } from '@/lib/storage';
 import { useTheme } from '@/lib/theme';
+import { entryOn, WEB_TOOLS } from '@/lib/tools/catalog';
 import { SEARCH_PROVIDERS, searchKeyId, searchWeb } from '@/lib/tools/web';
 import { useSettings, type SearchProvider } from '@/store/settings';
 
 const PROVIDERS = Object.keys(SEARCH_PROVIDERS) as SearchProvider[];
+
+const KEY_USE = { none: 'No key needed', optional: 'Key optional', required: 'Needs an API key' };
 
 /** Where the web_search tool sends queries. Changes save as they are made. */
 export default function SearchScreen() {
   const { colors } = useTheme();
   const search = useSettings((s) => s.search);
   const setSearch = useSettings((s) => s.setSearch);
+  const webOn = useSettings((s) => s.tools && s.web);
+  const disabled = useSettings((s) => s.disabledTools);
+  const setToolsEnabled = useSettings((s) => s.setToolsEnabled);
   const { provider } = search;
   const info = SEARCH_PROVIDERS[provider];
 
@@ -70,13 +76,32 @@ export default function SearchScreen() {
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Label>Search provider</Label>
-        <View style={styles.chips}>
-          {PROVIDERS.map((p) => (
-            <Chip key={p} label={SEARCH_PROVIDERS[p].label} selected={provider === p} onPress={() => choose(p)} />
+        <Section title="Tools" footer={webOn ? undefined : 'Web access is off, so models get neither tool.'} inset={16}>
+          {WEB_TOOLS.map((entry) => (
+            <ToggleRow
+              key={entry.title}
+              title={entry.title}
+              detail={entry.detail}
+              value={entryOn(entry, disabled)}
+              onValueChange={(on) => setToolsEnabled(entry.names, on)}
+              disabled={!webOn}
+            />
           ))}
-        </View>
-        <Text style={[styles.hint, { color: colors.textTertiary }]}>{info.hint}</Text>
+        </Section>
+
+        <Section title="Provider" footer={info.hint} inset={16} style={{ marginBottom: 4 }}>
+          {PROVIDERS.map((p) => (
+            <Row
+              key={p}
+              title={SEARCH_PROVIDERS[p].label}
+              detail={p === 'searxng' ? 'Self-hosted' : KEY_USE[SEARCH_PROVIDERS[p].key]}
+              selected={provider === p}
+              onPress={() => choose(p)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: provider === p }}
+            />
+          ))}
+        </Section>
 
         {info.key !== 'none' && (
           <>
@@ -143,7 +168,6 @@ export default function SearchScreen() {
 const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 60 },
   hint: { fontSize: 13, lineHeight: 18, marginTop: 6, marginHorizontal: 4 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   eye: { position: 'absolute', right: 14, top: 0, bottom: 0, justifyContent: 'center' },
   button: {
     flexDirection: 'row',

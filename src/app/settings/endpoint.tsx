@@ -2,7 +2,8 @@ import Feather from '@expo/vector-icons/Feather';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Chip, Input, Label } from '@/components/Form';
+import Animated, { LinearTransition } from 'react-native-reanimated';
+import { Chip, Disclosure, Input, Label } from '@/components/Form';
 import {
   getAdapter,
   guessEfforts,
@@ -289,9 +290,9 @@ export default function EndpointScreen() {
 
         {models.length > 0 && (
           <Text style={[styles.hint, { color: colors.textTertiary }]}>
-            Tap a model to edit its effort levels, lowest first; leave them empty to hide the effort control. Tap its context
-            budget to set how much chat history to keep, such as 128K or 1M; leave it empty to use 75% of the reported
-            context window, or 32K for local servers that don&apos;t report one.
+            Tap a model to edit its effort levels, lowest first, or leave them empty to hide the effort control. Tap its
+            context budget to set how much history to keep, such as 128K or 1M; empty uses 75% of the reported window, or
+            32K when none is reported.
           </Text>
         )}
 
@@ -383,63 +384,68 @@ export default function EndpointScreen() {
           </Pressable>
         )}
 
-        {type === 'openai' && (
-          <>
-            <Label>Effort parameter</Label>
-            <View style={styles.chips}>
-              {EFFORT_PARAMS.map((p) => (
-                <Chip key={p.value} label={p.label} selected={effortParam === p.value} onPress={() => setEffortParam(p.value)} />
-              ))}
-            </View>
-            <Text style={[styles.hint, { color: colors.textTertiary }]}>
-              {effortParam === 'chat_template_kwargs'
-                ? 'Sent as chat_template_kwargs: levels "off" and "on" set enable_thinking, any other level sets reasoning_effort (gpt-oss).'
-                : 'How the server takes the effort level. Detected when you fetch models.'}
-            </Text>
-          </>
-        )}
-
-        <Label>Extra headers</Label>
-        <Input
-          value={headersText}
-          onChangeText={setHeadersText}
-          placeholder={'Header-Name: value\nOne per line (optional)'}
-          multiline
-          style={{ minHeight: 70, textAlignVertical: 'top', fontFamily: fonts.mono, fontSize: 14 }}
-        />
-
-        <Pressable
-          onPress={testConnection}
-          disabled={!!busy}
-          style={({ pressed }) => [styles.button, { borderColor: colors.border }, pressed && { opacity: 0.6 }]}
-        >
-          {busy === 'test' ? (
-            <ActivityIndicator size="small" color={colors.text} />
-          ) : (
-            <Feather name="zap" size={16} color={colors.text} />
+        <Disclosure title="Advanced" initiallyOpen={!!headersText.trim()}>
+          {type === 'openai' && (
+            <>
+              <Label>Effort parameter</Label>
+              <View style={styles.chips}>
+                {EFFORT_PARAMS.map((p) => (
+                  <Chip key={p.value} label={p.label} selected={effortParam === p.value} onPress={() => setEffortParam(p.value)} />
+                ))}
+              </View>
+              <Text style={[styles.hint, { color: colors.textTertiary }]}>
+                {effortParam === 'chat_template_kwargs'
+                  ? 'Sent as chat_template_kwargs: levels "off" and "on" set enable_thinking, any other level sets reasoning_effort (gpt-oss).'
+                  : 'How the server takes the effort level. Detected when you fetch models.'}
+              </Text>
+            </>
           )}
-          <Text style={{ color: colors.text, fontSize: 16, fontWeight: '500' }}>Test connection</Text>
-        </Pressable>
 
-        {status && (
-          <View style={[styles.status, { backgroundColor: status.ok ? colors.surface : colors.dangerBg }]}>
-            <Feather
-              name={status.ok ? 'check-circle' : 'alert-circle'}
-              size={16}
-              color={status.ok ? colors.text : colors.danger}
-            />
-            <Text selectable style={{ flex: 1, color: status.ok ? colors.text : colors.danger, fontSize: 14, lineHeight: 20 }}>
-              {status.text}
-            </Text>
-          </View>
-        )}
+          <Label>Extra headers</Label>
+          <Input
+            value={headersText}
+            onChangeText={setHeadersText}
+            placeholder={'Header-Name: value\nOne per line (optional)'}
+            multiline
+            style={{ minHeight: 70, textAlignVertical: 'top', fontFamily: fonts.mono, fontSize: 14 }}
+          />
+        </Disclosure>
 
-        {existing && (
-          <Pressable onPress={remove} style={({ pressed }) => [styles.button, styles.delete, pressed && { opacity: 0.6 }]}>
-            <Feather name="trash-2" size={16} color={colors.danger} />
-            <Text style={{ color: colors.danger, fontSize: 16, fontWeight: '500' }}>Delete endpoint</Text>
+        {/* Slides along when the advanced settings above open or close. */}
+        <Animated.View layout={LinearTransition.duration(220)}>
+          <Pressable
+            onPress={testConnection}
+            disabled={!!busy}
+            style={({ pressed }) => [styles.button, { borderColor: colors.border }, pressed && { opacity: 0.6 }]}
+          >
+            {busy === 'test' ? (
+              <ActivityIndicator size="small" color={colors.text} />
+            ) : (
+              <Feather name="zap" size={16} color={colors.text} />
+            )}
+            <Text style={{ color: colors.text, fontSize: 16, fontWeight: '500' }}>Test connection</Text>
           </Pressable>
-        )}
+
+          {status && (
+            <View style={[styles.status, { backgroundColor: status.ok ? colors.surface : colors.dangerBg }]}>
+              <Feather
+                name={status.ok ? 'check-circle' : 'alert-circle'}
+                size={16}
+                color={status.ok ? colors.text : colors.danger}
+              />
+              <Text selectable style={{ flex: 1, color: status.ok ? colors.text : colors.danger, fontSize: 14, lineHeight: 20 }}>
+                {status.text}
+              </Text>
+            </View>
+          )}
+
+          {existing && (
+            <Pressable onPress={remove} style={({ pressed }) => [styles.button, styles.delete, pressed && { opacity: 0.6 }]}>
+              <Feather name="trash-2" size={16} color={colors.danger} />
+              <Text style={{ color: colors.danger, fontSize: 16, fontWeight: '500' }}>Delete endpoint</Text>
+            </Pressable>
+          )}
+        </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
   );

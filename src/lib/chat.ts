@@ -16,11 +16,6 @@ const FLUSH_MS = 40;
 // Model responses per reply before the agent loop gives up, so a confused model can't spin forever.
 const MAX_STEPS = 50;
 
-// Past AUTO_TRIGGER of the budget, old history is compressed mechanically down to AUTO_TARGET.
-// The model is asked to compress well before that, with summaries that keep more.
-const AUTO_TRIGGER = 0.9;
-const AUTO_TARGET = 0.6;
-
 /** Whether a request failed because the prompt is longer than the model's context window. */
 function isOverflow(e: unknown) {
   if (!(e instanceof Error)) return false;
@@ -130,8 +125,11 @@ async function runCompletion(id: string) {
     useChats.getState().finishThought(id, replyId, ms);
   };
 
-  const tools = settings.tools ? availableTools() : undefined;
+  // With every tool turned off one by one, the chat runs as if tools were off altogether.
+  const offered = settings.tools ? availableTools() : [];
+  const tools = offered.length ? offered : undefined;
   const budget = resolveBudget(endpoint, conversation.model);
+  const { compression } = useSettings.getState();
   const reply = () => useChats.getState().conversations[id]?.messages.find((m) => m.id === replyId);
 
   // Attachments and tool images are re-sent every step; read each file once per reply.
@@ -157,7 +155,9 @@ async function runCompletion(id: string) {
   try {
     apiKey = (await apiKeys.get(endpoint.id)) ?? undefined;
     for (let step = 1; ; step++) {
-      autoCompress(id, replyId, budget * AUTO_TRIGGER, budget * AUTO_TARGET);
+      // Past the trigger share of the budget, old history is compressed mechanically down to the
+      // target. The model is asked to compress well before that, with summaries that keep more.
+      autoCompress(id, replyId, (budget * compression.trigger) / 100, (budget * compression.target) / 100);
       // What changes between steps (time, workspace, jobs) goes after the newest history item and
       // stays there, so the system prompt and earlier history are a stable, cacheable prefix.
       if (tools) writeContextNote({ conversationId: id, replyId, budget });
