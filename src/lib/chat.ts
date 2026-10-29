@@ -4,6 +4,7 @@ import { useUI } from '@/store/ui';
 import { deleteAttachment, readAttachmentBase64, saveToWorkspace } from './attachments';
 import { autoCompress, buildWire, historyOf, historyTokens, unitsOf } from './context';
 import { ensureMemoryBase, extractMemories, memoryOn } from './memory';
+import { askToNotify, notifyReplyFinished } from './notifications';
 import { workspaceFor } from './projects';
 import { parsePartialJson } from './partialJson';
 import { getAdapter, ProviderError, type AttachmentPart, type Endpoint, type ToolCallDraft, type ToolPart } from './providers';
@@ -177,6 +178,7 @@ async function runCompletion(id: string) {
 
   const controller = new AbortController();
   controllers.set(id, controller);
+  void askToNotify();
   let buffer = '';
   let reasoningBuffer = '';
   // Tool calls the model is still writing in the current response, by stream index, with the id
@@ -403,6 +405,7 @@ async function runCompletion(id: string) {
     } else {
       const error = e instanceof Error ? e.message : String(e);
       useChats.getState().updateMessage(id, replyId, { status: 'error', error, content });
+      void notifyReplyFinished(id, replyId);
       return;
     }
   } finally {
@@ -429,6 +432,8 @@ async function runCompletion(id: string) {
     } catch {
       // No model to send with; the message stays queued.
     }
+    // Unless a queued message went out as the next turn, the agent is done.
+    if (!controllers.has(id)) void notifyReplyFinished(id, replyId);
   }
 }
 

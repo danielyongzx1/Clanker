@@ -52,6 +52,14 @@
       "expo-font",
       "expo-sharing",
       [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#0D0D0D",
+          "enableRemoteNotifications": false
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",

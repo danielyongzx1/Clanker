@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { DialogHost } from '@/components/Dialogs';
+import { ReplyNotifications } from '@/components/ReplyNotifications';
 import { ScriptRuntime } from '@/components/ScriptRuntime';
 import { UpdateCheck } from '@/components/Updates';
 import { useTheme } from '@/lib/theme';
@@ -80,6 +81,7 @@ export default function RootLayout() {
             </Stack>
             <DialogHost />
             <UpdateCheck />
+            <ReplyNotifications />
             {runtimeOn && <ScriptRuntime />}
           </ThemeProvider>
         </SafeAreaProvider>
