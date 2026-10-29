@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { deleteAttachment } from '@/lib/attachments';
 import type { ContentPart, Role, ToolPart } from '@/lib/providers';
 import { jsonFileStorage, uid } from '@/lib/storage';
+import { chatWorkspace } from '@/lib/workspace';
 import type { Memory } from './memory';
 
 export type MessageStatus = 'streaming' | 'done' | 'error';
@@ -77,11 +78,15 @@ export interface Conversation {
    * must not change; later changes reach the model through context notes.
    */
   memoryBase?: Memory[];
+  /** The project the chat belongs to; it works in the project's workspace. */
+  projectId?: string;
+  /** Set on chats from before workspaces were per chat: they keep the one they all shared. */
+  workspace?: 'shared';
 }
 
 interface ChatsState {
   conversations: Record<string, Conversation>;
-  create: (endpointId: string, model: string, opts?: { memory?: false }) => string;
+  create: (endpointId: string, model: string, opts?: { memory?: false; projectId?: string }) => string;
   remove: (id: string) => void;
   rename: (id: string, title: string, titled?: boolean) => void;
   setModel: (id: string, endpointId: string, model: string) => void;
@@ -148,6 +153,7 @@ export const useChats = create<ChatsState>()(
                 model,
                 messages: [],
                 ...(opts?.memory === false ? { memory: false as const } : {}),
+                ...(opts?.projectId ? { projectId: opts.projectId } : {}),
               },
             },
           }));
@@ -157,6 +163,13 @@ export const useChats = create<ChatsState>()(
           const c = get().conversations[id];
           if (!c) return;
           imagesOf(c.messages).forEach(deleteAttachment);
+          if (!c.projectId && !c.workspace) {
+            try {
+              chatWorkspace(id).remove();
+            } catch {
+              // The files stay behind; Settings → Workspace files can still delete them.
+            }
+          }
           set((s) => {
             const { [id]: _, ...rest } = s.conversations;
             return { conversations: rest };
@@ -224,6 +237,13 @@ export const useChats = create<ChatsState>()(
       name: 'chats',
       storage: jsonFileStorage,
       partialize: (s) => ({ conversations: s.conversations }),
+      version: 1,
+      // v0 chats all worked in one shared workspace; they keep it, while new chats get their own.
+      migrate: (persisted, version) => {
+        const state = persisted as Pick<ChatsState, 'conversations'>;
+        if (version < 1) for (const c of Object.values(state?.conversations ?? {})) c.workspace = 'shared';
+        return state;
+      },
       // A reply, tool call or background job that was running when the app was killed can never finish.
       merge: (persisted, current) => {
         const conversations = (persisted as Pick<ChatsState, 'conversations'>)?.conversations ?? {};

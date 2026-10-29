@@ -1,8 +1,9 @@
 import { messageText, useChats, type Conversation } from '@/store/chats';
-import { MemoryError, useMemory, type Memory } from '@/store/memory';
+import { inPool, MemoryError, poolOf, useMemory, type Memory } from '@/store/memory';
 import { useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
 import { textMatches, textSnippet } from './context';
+import { canSee, memoryPool } from './projects';
 import { getAdapter, type Endpoint } from './providers';
 import { describeCall } from './tools/describe';
 
@@ -21,17 +22,28 @@ export function memoryOn(conversationId: string | null | undefined) {
   return useChats.getState().conversations[conversationId]?.memory !== false;
 }
 
+/** The memories in a chat's pool now (see lib/projects memoryPool). */
+export function currentMemories(conversationId: string | null | undefined) {
+  return poolOf(useMemory.getState().memories, memoryPool(conversationId));
+}
+
 /** The memories a chat's system prompt shows: its snapshot, or the current ones before it has one. */
 export function memoriesFor(conversationId: string | null | undefined) {
   const base = conversationId ? useChats.getState().conversations[conversationId]?.memoryBase : undefined;
-  return base ?? useMemory.getState().memories;
+  return base ?? currentMemories(conversationId);
+}
+
+/** A memory the chat's tools may change: one in its own pool. */
+export function memoryInPool(conversationId: string, id: unknown) {
+  const memory = useMemory.getState().memories.find((m) => m.id === id);
+  return memory && inPool(memory, memoryPool(conversationId)) ? memory : undefined;
 }
 
 /** Freezes the memories a chat's system prompt shows, on its first request. */
 export function ensureMemoryBase(conversationId: string) {
   const conversation = useChats.getState().conversations[conversationId];
   if (!conversation || conversation.memoryBase || !memoryOn(conversationId)) return;
-  useChats.getState().setMemoryBase(conversationId, useMemory.getState().memories);
+  useChats.getState().setMemoryBase(conversationId, currentMemories(conversationId));
 }
 
 const listed = (memories: Memory[]) => memories.map((m) => `- [${m.id}] ${m.text}`).join('\n');
@@ -67,7 +79,7 @@ export function memorySection(memories: Memory[], opts: { writable: boolean; cha
 /** Memories added, changed and forgotten since the chat's snapshot, as lines for its context note. */
 export function memoryDiff(conversation: Conversation) {
   const base = conversation.memoryBase ?? [];
-  const current = useMemory.getState().memories;
+  const current = currentMemories(conversation.id);
   const before = new Map(base.map((m) => [m.id, m]));
   const now = new Set(current.map((m) => m.id));
   const lines: string[] = [];
@@ -90,7 +102,7 @@ export function searchChats(query: string, excludeId: string, limit: number) {
   if (!q) throw new MemoryError('Pass a query.');
   const found: { c: Conversation; hits: string[] }[] = [];
   for (const c of Object.values(useChats.getState().conversations)) {
-    if (c.id === excludeId || c.memory === false) continue;
+    if (c.id === excludeId || !canSee(excludeId, c)) continue;
     const hits = c.messages.flatMap((m) => {
       const text = messageText(m);
       return text && textMatches(text, q) ? [`${m.role}: …${textSnippet(text, q)}…`] : [];
@@ -122,10 +134,11 @@ function transcript(c: Conversation) {
 }
 
 /** The read_chat tool: a past chat's transcript, a page at a time. */
-export function readChat(chatId: string, offset: number) {
+export function readChat(fromId: string, chatId: string, offset: number) {
   const c = useChats.getState().conversations[chatId];
   if (!c) throw new MemoryError(`No chat "${chatId}". Find chats with search_chats.`);
   if (c.memory === false) throw new MemoryError('That chat is a temporary chat, which other chats cannot read.');
+  if (!canSee(fromId, c)) throw new MemoryError('That chat is walled off from this one by a project with its own memory.');
   const text = transcript(c);
   const start = Math.max(0, offset);
   const page = text.slice(start, start + CHAT_PAGE_CHARS);
@@ -177,7 +190,8 @@ export async function extractMemories(
   const replyText = messageText(conversation.messages[index]).slice(0, EXTRACT_CHARS);
   if (!userText.trim()) return;
 
-  const memories = useMemory.getState().memories;
+  const pool = memoryPool(conversationId);
+  const memories = poolOf(useMemory.getState().memories, pool);
   const prompt =
     'You keep a memory of facts about the user of a chat app, used to personalise their future conversations. ' +
     'Below are the saved memories and the latest exchange.\n\n' +
@@ -224,13 +238,13 @@ export async function extractMemories(
     }
   };
   for (const text of array(ops.add).slice(0, MAX_ADDS)) {
-    if (typeof text === 'string') attempt(() => store.add(text, 'auto', conversationId), text.trim());
+    if (typeof text === 'string') attempt(() => store.add(text, 'auto', conversationId, pool), text.trim());
   }
   for (const u of array(ops.update)) {
-    if (u && typeof u.id === 'string' && typeof u.text === 'string') attempt(() => store.update(u.id, u.text), u.text.trim());
+    if (u && typeof u.text === 'string' && memoryInPool(conversationId, u.id)) attempt(() => store.update(u.id, u.text), u.text.trim());
   }
   for (const id of array(ops.remove)) {
-    const old = typeof id === 'string' ? useMemory.getState().memories.find((m) => m.id === id) : undefined;
+    const old = memoryInPool(conversationId, id);
     if (old) attempt(() => store.remove(old.id), `Forgot: ${old.text}`);
   }
   if (saved.length) useChats.getState().updateMessage(conversationId, replyId, { memorySaved: saved });

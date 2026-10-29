@@ -4,6 +4,7 @@ import { useUI } from '@/store/ui';
 import { readAttachmentBase64, saveToWorkspace } from './attachments';
 import { autoCompress, buildWire, historyOf, historyTokens, unitsOf } from './context';
 import { ensureMemoryBase, extractMemories, memoryOn } from './memory';
+import { workspaceFor } from './projects';
 import { getAdapter, ProviderError, type AttachmentPart, type Endpoint, type ToolPart } from './providers';
 import { apiKeys, uid } from './storage';
 import { availableTools, executeTool } from './tools';
@@ -14,9 +15,6 @@ const controllers = new Map<string, AbortController>();
 
 // Batch tokens so the store (and the markdown re-render) updates at most ~25 times a second.
 const FLUSH_MS = 40;
-
-// Model responses per reply before the agent loop gives up, so a confused model can't spin forever.
-const MAX_STEPS = 50;
 
 /** Whether a request failed because the prompt is longer than the model's context window. */
 function isOverflow(e: unknown) {
@@ -37,14 +35,20 @@ export function sendMessage(conversationId: string | null, text: string, attachm
   const { active, tools } = useSettings.getState();
   if (!active) throw new Error('Add an endpoint in Settings to start chatting.');
   const chats = useChats.getState();
-  const memoryOff = !conversationId && useUI.getState().newChatMemoryOff;
-  const id = conversationId ?? chats.create(active.endpointId, active.model, memoryOff ? { memory: false } : undefined);
+  const ui = useUI.getState();
+  const id =
+    conversationId ??
+    chats.create(active.endpointId, active.model, {
+      ...(ui.newChatMemoryOff ? { memory: false as const } : {}),
+      ...(ui.newChatProjectId ? { projectId: ui.newChatProjectId } : {}),
+    });
 
   // With tools on, attachments are also copied into the workspace so the agent can work on them.
+  const ws = workspaceFor(id);
   const parts = tools
     ? attachments.map((a) => {
         try {
-          return { ...a, path: saveToWorkspace(a) };
+          return { ...a, path: saveToWorkspace(ws, a) };
         } catch {
           return a;
         }
@@ -208,8 +212,10 @@ async function runCompletion(id: string) {
       flush();
       markThoughtDone();
       if (!tools || !result.toolCalls.length) break;
-      if (step >= MAX_STEPS) {
-        useChats.getState().appendText(id, replyId, `\n\n_Stopped after ${MAX_STEPS} rounds of tool calls._`);
+      // Read every step, so setting a limit mid-reply can rein in a model that's spinning.
+      const { maxSteps } = useSettings.getState();
+      if (maxSteps && step >= maxSteps) {
+        useChats.getState().appendText(id, replyId, `\n\n_Stopped after ${maxSteps} rounds of tool calls._`);
         break;
       }
 

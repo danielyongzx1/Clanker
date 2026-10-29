@@ -4,7 +4,8 @@ import { useSettings } from '@/store/settings';
 import { formatTokens, historyOf, historyTokens, unitsOf } from '../context';
 import { describeJob, jobsOf } from '../jobs';
 import { memoriesFor, memoryDiff, memoryOn, memorySection } from '../memory';
-import { formatSize, walk } from '../workspace';
+import { projectSection, workspaceFor } from '../projects';
+import { formatSize } from '../workspace';
 import { toolOn } from './index';
 
 const FILE_TOOLS = ['list_files', 'read_file', 'search_files', 'write_file', 'edit_file', 'move_path', 'delete_path'];
@@ -151,9 +152,10 @@ export function agentSystemPrompt() {
 }
 
 /**
- * The whole system prompt of a chat: the agent prompt when it has tools, and its memories when
- * memory is on. Undefined when there is neither. Stays the same through a chat as long as the
- * tool settings do, since the memories shown are the chat's snapshot.
+ * The whole system prompt of a chat: the agent prompt when it has tools, its project's
+ * instructions when it is in one, and its memories when memory is on. Undefined when there is none
+ * of these. Stays the same through a chat as long as the tool and project settings do, since the
+ * memories shown are the chat's snapshot.
  */
 export function systemPrompt(conversationId: string | null, withTools: boolean) {
   const memory = memoryOn(conversationId)
@@ -162,7 +164,7 @@ export function systemPrompt(conversationId: string | null, withTools: boolean) 
         chats: withTools && toolOn('search_chats', conversationId),
       })
     : '';
-  const parts = [withTools ? agentSystemPrompt() : '', memory].filter(Boolean);
+  const parts = [withTools ? agentSystemPrompt() : '', projectSection(conversationId, withTools), memory].filter(Boolean);
   return parts.length ? parts.join('\n\n') : undefined;
 }
 
@@ -177,7 +179,7 @@ export function writeContextNote(opts: { conversationId: string; replyId: string
   const last = units[units.length - 1];
   if (!last) return;
 
-  const entries = walk('', 41);
+  const entries = workspaceFor(opts.conversationId).walk('', 41);
   const workspace = entries.length
     ? entries
         .slice(0, 40)

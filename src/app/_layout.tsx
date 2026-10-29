@@ -58,15 +58,23 @@ export default function RootLayout() {
         <SafeAreaProvider>
           <ThemeProvider value={navTheme}>
             <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-            <Stack screenOptions={{ headerShadowVisible: false, headerBackButtonDisplayMode: 'minimal' }}>
+            {/* Screens under the top one stay mounted; frozen, they skip re-rendering meanwhile (a
+                project's chat streaming over the main chat screen, which shows the same stores). */}
+            <Stack screenOptions={{ headerShadowVisible: false, headerBackButtonDisplayMode: 'minimal', freezeOnBlur: true }}>
               <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
               <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
               <Stack.Screen name="settings/endpoint" options={{ presentation: 'modal', title: 'Endpoint' }} />
-              <Stack.Screen name="settings/workspace" options={{ title: 'Workspace' }} />
+              <Stack.Screen name="settings/workspace" options={{ title: 'Workspace files' }} />
               <Stack.Screen name="settings/tools" options={{ title: 'Files & code' }} />
               <Stack.Screen name="settings/context" options={{ title: 'Auto-compression' }} />
               <Stack.Screen name="settings/search" options={{ title: 'Web access' }} />
               <Stack.Screen name="settings/memory" options={{ title: 'Memory' }} />
+              <Stack.Screen name="settings/files" options={{ title: 'Files' }} />
+              <Stack.Screen name="projects/index" options={{ title: 'Projects' }} />
+              <Stack.Screen name="projects/[id]" options={{ title: '' }} />
+              <Stack.Screen name="projects/chat" options={{ headerShown: false }} />
+              <Stack.Screen name="projects/edit" options={{ title: 'Edit project' }} />
+              <Stack.Screen name="projects/instructions" options={{ title: 'Instructions' }} />
             </Stack>
             {runtimeOn && <ScriptRuntime />}
           </ThemeProvider>

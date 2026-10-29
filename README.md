@@ -15,7 +15,7 @@ Features: streaming replies with stop/regenerate, markdown with syntax-highlight
 
 ## Agent tools
 
-With **Settings → File & code tools** on (the default), models get tools that work on a private workspace folder on the phone:
+With **Settings → File & code tools** on (the default), models get tools that work on a private workspace folder on the phone. Each chat has its own workspace; chats in a project share the project's (chats from before workspaces were per chat keep the one folder they all shared):
 
 | Tool | What it does |
 | --- | --- |
@@ -38,7 +38,9 @@ Background jobs run in their own worker (or shell process) while the model keeps
 
 **Memory.** Short facts about the user (at most 500 characters each, 12,000 in all) live in **Settings → Memory**, where they can be added, edited and deleted. Each chat freezes the memories it starts with into its system prompt, so prompts keep caching; later changes reach it through the `<context>` note. Models save memories with the memory tools, and after each reply a short extra request picks up anything worth remembering (this works without tool calling and can be turned off). With **Files & code** off, chats still see their memories but can't change them. The eye button on a new chat starts a temporary chat that neither uses nor saves memories, and that `search_chats` skips. The code is in [src/lib/memory.ts](src/lib/memory.ts) and [src/store/memory.ts](src/store/memory.ts).
 
-For formats with no built-in reader, the model is told to write a script that handles the file. Attached files are copied into the workspace. Files the agent writes show up as chips under its reply (tap to open, long-press to share), and in **Settings → Workspace files**.
+**Projects.** **Projects** in the sidebar groups chats that should share a workspace. Long-press a project (or use its ⋮ menu) to start a chat in it, pin it to the sidebar, rename it, change its memory or edit its instructions. A project's page lists its chats, its sources (files you add for its chats to draw on, kept in `sources/` in its workspace) and the rest of its workspace. Typing in the composer at the bottom of the page starts a chat in the project. A project's chats open over its page, with a back button to it in place of the sidebar button. Its instructions go into the system prompt of every chat in it. With **project-only memory** its chats see and save only the project's own memories, and `search_chats` / `read_chat` can't cross between the project and other chats in either direction. The code is in [src/lib/projects.ts](src/lib/projects.ts) and [src/store/projects.ts](src/store/projects.ts).
+
+For formats with no built-in reader, the model is told to write a script that handles the file. Attached files are copied into the workspace. Files the agent writes show up as chips under its reply (tap to open, long-press to share), and in **Settings → Workspace files**, which lists every workspace.
 
 The Python and JavaScript runtimes run in a hidden WebView and load Pyodide from jsDelivr on first use (cached afterwards). The shell is a local Expo module ([modules/clanker-shell](modules/clanker-shell)), so it needs a development build; it isn't in Expo Go, and iOS can't spawn processes at all.
 
@@ -63,7 +65,8 @@ For a local Ollama or LM Studio server, use your computer's LAN IP (not `localho
 - `src/lib/context.ts` – history units, compression, and building the request history
 - `src/lib/jobs.ts` – background jobs
 - `src/lib/runtime/` – the Python/JavaScript WebView runtime and its bridge
-- `src/lib/workspace.ts` – the sandboxed workspace folder the tools work in
+- `src/lib/workspace.ts` – the sandboxed workspace folders the tools work in (one per chat or project)
+- `src/lib/projects.ts` – which workspace and memory a chat uses, project sources, and the project part of the system prompt
 - `modules/clanker-shell/` – native Android module that runs shell commands
 - `src/store/` – zustand stores persisted to JSON files
 

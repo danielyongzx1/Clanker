@@ -1,10 +1,13 @@
 import Feather from '@expo/vector-icons/Feather';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Row, Section, ToggleRow } from '@/components/Form';
 import { entryOn, MEMORY_TOOLS } from '@/lib/tools/catalog';
 import { useTheme } from '@/lib/theme';
-import { MAX_MEMORY_CHARS, MAX_TOTAL_CHARS, useMemory, type Memory } from '@/store/memory';
+import { useShallow } from 'zustand/react/shallow';
+import { MAX_MEMORY_CHARS, MAX_TOTAL_CHARS, poolOf, useMemory, type Memory } from '@/store/memory';
+import { useProjects } from '@/store/projects';
 import { useSettings } from '@/store/settings';
 
 const SOURCES: Record<Memory['source'], string> = {
@@ -24,10 +27,15 @@ function report(e: unknown) {
   Alert.alert('Could not save', e instanceof Error ? e.message : String(e));
 }
 
-/** What the models remember about the user, and how they come to remember it. */
+/**
+ * What the models remember about the user, and how they come to remember it. With a `project`
+ * param, the memories of a project with project-only memory instead.
+ */
 export default function MemoryScreen() {
   const { colors } = useTheme();
-  const memories = useMemory((s) => s.memories);
+  const { project: projectId } = useLocalSearchParams<{ project?: string }>();
+  const project = useProjects((s) => (projectId ? s.projects[projectId] : undefined));
+  const memories = useMemory(useShallow((s) => poolOf(s.memories, projectId)));
   const memory = useSettings((s) => s.memory);
   const setMemory = useSettings((s) => s.setMemory);
   const memoryAuto = useSettings((s) => s.memoryAuto);
@@ -44,7 +52,7 @@ export default function MemoryScreen() {
     const store = useMemory.getState();
     try {
       if (editing.id) store.update(editing.id, editing.text);
-      else store.add(editing.text, 'user');
+      else store.add(editing.text, 'user', undefined, projectId);
       setEditing(null);
     } catch (e) {
       report(e);
@@ -57,43 +65,51 @@ export default function MemoryScreen() {
   };
 
   const clearAll = () =>
-    Alert.alert('Delete all memories?', 'New chats will start without knowing anything about you.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete all', style: 'destructive', onPress: () => useMemory.getState().clear() },
-    ]);
+    Alert.alert(
+      'Delete all memories?',
+      project ? `New chats in "${project.name}" will start without its memories.` : 'New chats will start without knowing anything about you.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete all', style: 'destructive', onPress: () => useMemory.getState().clear(projectId) },
+      ]
+    );
 
   const used = memories.reduce((n, m) => n + m.text.length, 0);
   const newest = [...memories].sort((a, b) => b.updatedAt - a.updatedAt);
 
   return (
     <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={styles.content}>
+      {project && <Stack.Screen options={{ title: `${project.name} memory` }} />}
       <Text style={[styles.intro, { color: colors.textTertiary }]}>
-        Memories are short facts about you that every chat can see, so you don&apos;t have to repeat yourself. Changes
-        apply to new chats, and to open chats from your next message when Files &amp; code is on.
+        {project
+          ? `"${project.name}" keeps its own memory: only chats in it see these, and they don't see your other memories. Changes apply to new chats, and to open chats from your next message when Files & code is on.`
+          : "Memories are short facts about you that every chat can see, so you don't have to repeat yourself. Changes apply to new chats, and to open chats from your next message when Files & code is on. Projects with project-only memory keep theirs apart."}
       </Text>
 
-      <Section footer="Saving automatically sends one short extra request to the chat's model after each reply. Start a temporary chat from the eye button on a new chat to leave memory out of it.">
-        <ToggleRow icon="bookmark" title="Use memory" detail="Chats see your saved memories" value={memory} onValueChange={setMemory} />
-        <ToggleRow
-          icon="zap"
-          title="Save from chats automatically"
-          detail="Pick up what's worth remembering after each reply"
-          value={memoryAuto && memory}
-          onValueChange={setMemoryAuto}
-          disabled={!memory}
-        />
-        {MEMORY_TOOLS.map((entry) => (
+      {!project && (
+        <Section footer="Saving automatically sends one short extra request to the chat's model after each reply. Start a temporary chat from the eye button on a new chat to leave memory out of it.">
+          <ToggleRow icon="bookmark" title="Use memory" detail="Chats see your saved memories" value={memory} onValueChange={setMemory} />
           <ToggleRow
-            key={entry.title}
-            icon={entry.names.includes('search_chats') ? 'search' : 'edit-3'}
-            title={entry.title}
-            detail={tools ? entry.detail : 'Needs files & code'}
-            value={entryOn(entry, disabled) && memory && tools}
-            onValueChange={(on) => setToolsEnabled(entry.names, on)}
-            disabled={!memory || !tools}
+            icon="zap"
+            title="Save from chats automatically"
+            detail="Pick up what's worth remembering after each reply"
+            value={memoryAuto && memory}
+            onValueChange={setMemoryAuto}
+            disabled={!memory}
           />
-        ))}
-      </Section>
+          {MEMORY_TOOLS.map((entry) => (
+            <ToggleRow
+              key={entry.title}
+              icon={entry.names.includes('search_chats') ? 'search' : 'edit-3'}
+              title={entry.title}
+              detail={tools ? entry.detail : 'Needs files & code'}
+              value={entryOn(entry, disabled) && memory && tools}
+              onValueChange={(on) => setToolsEnabled(entry.names, on)}
+              disabled={!memory || !tools}
+            />
+          ))}
+        </Section>
+      )}
 
       <Section
         title={`Saved memories · ${Math.round((used / MAX_TOTAL_CHARS) * 100)}% full`}

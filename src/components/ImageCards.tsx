@@ -4,7 +4,8 @@ import { memo, useMemo, useState } from 'react';
 import { Alert, Linking, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { openWorkspaceFile } from '@/lib/openFile';
 import { useTheme } from '@/lib/theme';
-import { fileAt } from '@/lib/workspace';
+import type { Workspace } from '@/lib/workspace';
+import { useWorkspace } from '@/lib/useWorkspace';
 import { REPLY_GUTTER } from './Chart';
 import { HorizontalScroll } from './HorizontalScroll';
 
@@ -20,19 +21,19 @@ const CARD_GAP = 12;
 const ratios = new Map<string, number>();
 
 /** Where an image the model referenced lives: a web URL as is, anything else as a workspace path. */
-function resolve(src: string): { uri: string; workspace?: string } {
-  if (REMOTE.test(src) || src.startsWith('file:')) return { uri: src };
+function resolve(src: string, ws: Workspace | null): { uri: string; workspace?: string } {
+  if (REMOTE.test(src) || src.startsWith('file:') || !ws) return { uri: src };
   try {
-    const file = fileAt(src);
+    const file = ws.fileAt(src);
     if (file.exists) return { uri: file.uri, workspace: src };
   } catch {}
   return { uri: src };
 }
 
-function openTarget(link: string | undefined, src: string) {
+function openTarget(link: string | undefined, src: string, ws: Workspace | null) {
   const target = link || src;
-  const { workspace } = resolve(target);
-  const run = workspace ? openWorkspaceFile(workspace) : /^https?:/i.test(target) ? Linking.openURL(target) : null;
+  const { workspace } = resolve(target, ws);
+  const run = workspace && ws ? openWorkspaceFile(ws, workspace) : /^https?:/i.test(target) ? Linking.openURL(target) : null;
   run?.catch((e) => Alert.alert('Could not open', e instanceof Error ? e.message : String(e)));
 }
 
@@ -72,7 +73,8 @@ function Broken({ height }: { height?: number }) {
 function ChatImageInner({ src, alt, title }: { src: string; alt?: string; title?: string }) {
   const { colors } = useTheme();
   // Resolving a workspace path checks the file, so it is done once, not on every streamed token.
-  const source = useMemo(() => ({ uri: resolve(src).uri }), [src]);
+  const ws = useWorkspace();
+  const source = useMemo(() => ({ uri: resolve(src, ws).uri }), [src, ws]);
   const uri = source.uri;
   // Whether the image was seen before, fixed at mount so the fade setting doesn't change under a loading image.
   const [known] = useState(() => ratios.has(uri));
@@ -83,7 +85,7 @@ function ChatImageInner({ src, alt, title }: { src: string; alt?: string; title?
       {failed ? (
         <Broken />
       ) : (
-        <Pressable onPress={() => openTarget(undefined, src)} accessibilityRole="imagebutton" accessibilityLabel={alt || title || 'Image'}>
+        <Pressable onPress={() => openTarget(undefined, src, ws)} accessibilityRole="imagebutton" accessibilityLabel={alt || title || 'Image'}>
           <Image
             source={source}
             // Very tall images are cut down rather than taking over the reply.
@@ -112,13 +114,14 @@ function Card({ card, width }: { card: ImageCard; width: number }) {
   const { colors } = useTheme();
   const [failed, setFailed] = useState(false);
   const height = Math.round(width * 0.8);
-  const source = useMemo(() => ({ uri: resolve(card.url).uri }), [card.url]);
+  const ws = useWorkspace();
+  const source = useMemo(() => ({ uri: resolve(card.url, ws).uri }), [card.url, ws]);
   const uri = source.uri;
   const [known] = useState(() => ratios.has(uri));
   const contain = card.fit === 'contain';
   return (
     <Pressable
-      onPress={() => openTarget(card.link, card.url)}
+      onPress={() => openTarget(card.link, card.url, ws)}
       accessibilityRole="imagebutton"
       accessibilityLabel={card.title || 'Image'}
       style={({ pressed }) => [{ width }, pressed && { opacity: 0.8 }]}

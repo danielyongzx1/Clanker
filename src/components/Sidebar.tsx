@@ -8,7 +8,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { stopStreaming } from '@/lib/chat';
 import { useTheme } from '@/lib/theme';
 import { messageText, useChats, type Conversation } from '@/store/chats';
+import { useProjects } from '@/store/projects';
 import { useUI } from '@/store/ui';
+import { openProjectChat, useProjectMenu } from './ProjectMenu';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -34,14 +36,27 @@ export function Sidebar({ navigation }: DrawerContentComponentProps) {
   const conversations = useChats((s) => s.conversations);
   const currentId = useUI((s) => s.currentId);
   const open = useUI((s) => s.open);
+  const projects = useProjects((s) => s.projects);
+  const currentProjectId = useChats((s) => (currentId ? s.conversations[currentId]?.projectId : undefined));
+  const newChatProjectId = useUI((s) => s.newChatProjectId);
+  const activeProjectId = currentId ? currentProjectId : newChatProjectId;
+  const { show: showProjectMenu, menu: projectMenu } = useProjectMenu({
+    onNewChat: () => navigation.closeDrawer(),
+    onNavigate: () => navigation.closeDrawer(),
+  });
+  const pinned = useMemo(
+    () => Object.values(projects).filter((p) => p.pinnedAt).sort((a, b) => a.pinnedAt! - b.pinnedAt!),
+    [projects]
+  );
   const [query, setQuery] = useState('');
   const [renaming, setRenaming] = useState<Conversation | null>(null);
   const [renameText, setRenameText] = useState('');
 
   const sections = useMemo(() => {
     const q = query.trim().toLowerCase();
+    // Chats in a project are listed in it, and here only when searching.
     const list = Object.values(conversations)
-      .filter((c) => c.messages.length > 0)
+      .filter((c) => c.messages.length > 0 && (!c.projectId || q))
       .filter(
         (c) =>
           !q || c.title.toLowerCase().includes(q) || c.messages.some((m) => messageText(m).toLowerCase().includes(q))
@@ -51,8 +66,16 @@ export function Sidebar({ navigation }: DrawerContentComponentProps) {
   }, [conversations, query]);
 
   const select = (id: string | null) => {
-    open(id);
     navigation.closeDrawer();
+    // A project's chats open over its page, with a back button to it.
+    const projectId = id ? conversations[id]?.projectId : undefined;
+    if (id && projectId) openProjectChat(projectId, id);
+    else open(id);
+  };
+
+  const goTo = (href: '/projects' | { pathname: '/projects/[id]'; params: { id: string } }) => {
+    navigation.closeDrawer();
+    router.push(href);
   };
 
   const showActions = (c: Conversation) => {
@@ -108,6 +131,13 @@ export function Sidebar({ navigation }: DrawerContentComponentProps) {
         <Feather name="message-circle" size={18} color={colors.text} />
         <Text style={[styles.itemText, { color: colors.text, fontWeight: '500' }]}>New chat</Text>
       </Pressable>
+      <Pressable
+        onPress={() => goTo('/projects')}
+        style={({ pressed }) => [styles.item, styles.newChat, pressed && { backgroundColor: colors.surfaceHover }]}
+      >
+        <Feather name="folder" size={18} color={colors.text} />
+        <Text style={[styles.itemText, { color: colors.text, fontWeight: '500' }]}>Projects</Text>
+      </Pressable>
 
       <SectionList
         sections={sections}
@@ -115,6 +145,29 @@ export function Sidebar({ navigation }: DrawerContentComponentProps) {
         stickySectionHeadersEnabled={false}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: 12 }}
+        ListHeaderComponent={
+          pinned.length ? (
+            <View>
+              {pinned.map((p) => (
+                <Pressable
+                  key={p.id}
+                  onPress={() => goTo({ pathname: '/projects/[id]', params: { id: p.id } })}
+                  onLongPress={(e) => showProjectMenu(p, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
+                  style={({ pressed }) => [
+                    styles.item,
+                    styles.newChat,
+                    (p.id === activeProjectId || pressed) && { backgroundColor: colors.surfaceHover },
+                  ]}
+                >
+                  <Feather name="folder" size={18} color={colors.textSecondary} />
+                  <Text numberOfLines={1} style={[styles.itemText, styles.project, { color: colors.text }]}>
+                    {p.name}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : undefined
+        }
         renderSectionHeader={({ section }) => (
           <Text style={[styles.section, { color: colors.textTertiary }]}>{section.title}</Text>
         )}
@@ -130,6 +183,11 @@ export function Sidebar({ navigation }: DrawerContentComponentProps) {
             <Text numberOfLines={1} style={[styles.itemText, { color: colors.text }]}>
               {item.title}
             </Text>
+            {item.projectId && projects[item.projectId] && (
+              <Text numberOfLines={1} style={[styles.itemProject, { color: colors.textTertiary }]}>
+                {projects[item.projectId].name}
+              </Text>
+            )}
           </Pressable>
         )}
         ListEmptyComponent={
@@ -155,6 +213,8 @@ export function Sidebar({ navigation }: DrawerContentComponentProps) {
         </View>
         <Text style={[styles.itemText, { color: colors.text, fontWeight: '500' }]}>Settings</Text>
       </Pressable>
+
+      {projectMenu}
 
       <Modal visible={!!renaming} transparent animationType="fade" onRequestClose={() => setRenaming(null)}>
         <Pressable style={[styles.dialogBackdrop, { backgroundColor: colors.overlay }]} onPress={() => setRenaming(null)}>
@@ -193,6 +253,8 @@ const styles = StyleSheet.create({
   section: { fontSize: 13, fontWeight: '600', paddingHorizontal: 20, paddingTop: 18, paddingBottom: 6 },
   item: { marginHorizontal: 8, paddingHorizontal: 12, paddingVertical: 11, borderRadius: 10 },
   itemText: { fontSize: 16 },
+  itemProject: { fontSize: 13, marginTop: 2 },
+  project: { flex: 1 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 14 },
   footer: {
     flexDirection: 'row',

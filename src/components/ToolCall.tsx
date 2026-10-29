@@ -7,6 +7,8 @@ import { openWorkspaceFile, shareWorkspaceFile } from '@/lib/openFile';
 import type { ToolPart } from '@/lib/providers';
 import { fonts, useTheme } from '@/lib/theme';
 import { describeCall } from '@/lib/tools';
+import type { Workspace } from '@/lib/workspace';
+import { useWorkspace } from '@/lib/useWorkspace';
 import { CodeBlock } from './CodeBlock';
 
 const ICONS: Record<string, keyof typeof Feather.glyphMap> = {
@@ -98,8 +100,9 @@ function CallInput({ part }: { part: ToolPart }) {
 /** Chips for files a tool created or changed; tap to open, long-press to share. */
 export function FileChips({ files }: { files: string[] }) {
   const { colors } = useTheme();
-  const run = (fn: (p: string) => Promise<void>, path: string) =>
-    fn(path).catch((e) => Alert.alert('Could not open file', e instanceof Error ? e.message : String(e)));
+  const ws = useWorkspace();
+  const run = (fn: (ws: Workspace, p: string) => Promise<void>, path: string) =>
+    (ws ? fn(ws, path) : Promise.reject(new Error('This chat has no workspace.'))).catch((e) => Alert.alert('Could not open file', e instanceof Error ? e.message : String(e)));
   return (
     <View style={styles.chips}>
       {files.map((path) => (

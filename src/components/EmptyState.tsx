@@ -16,9 +16,11 @@ type Props = {
   onAddEndpoint: () => void;
   /** The chat about to be started is a temporary one, without memory. */
   memoryOff?: boolean;
+  /** The name of the project the chat about to be started goes in. */
+  project?: string;
 };
 
-export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff }: Props) {
+export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff, project }: Props) {
   const { colors } = useTheme();
 
   if (!hasEndpoint) {
@@ -34,7 +36,20 @@ export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff
 
   return (
     <View style={styles.container}>
-      {memoryOff && (
+      {!!project && (
+        <View style={styles.temporary}>
+          <Feather name="folder" size={22} color={colors.textSecondary} />
+          <Text numberOfLines={2} style={[styles.temporaryTitle, { color: colors.text }]}>
+            {project}
+          </Text>
+          <Text style={[styles.temporaryText, { color: colors.textTertiary }]}>
+            {memoryOff
+              ? "A temporary chat in this project: it shares the project's files and instructions, but won't use or save memories."
+              : "New chat in this project. It shares the project's files, sources and instructions."}
+          </Text>
+        </View>
+      )}
+      {memoryOff && !project && (
         <View style={styles.temporary}>
           <Feather name="eye-off" size={22} color={colors.textSecondary} />
           <Text style={[styles.temporaryTitle, { color: colors.text }]}>Temporary chat</Text>

@@ -6,22 +6,12 @@ import { ClankerShell } from '../../../modules/clanker-shell';
 import { importAsset } from '../attachments';
 import { compress, contextStatus, decompress, searchContext } from '../context';
 import { describeJob, getJob, jobsOf, killJob, startJob, waitForJob } from '../jobs';
-import { memoryOn, readChat, searchChats } from '../memory';
+import { memoryInPool, memoryOn, readChat, searchChats } from '../memory';
+import { memoryPool, workspaceFor } from '../projects';
 import type { ImagePart, Source, ToolCall, ToolSpec } from '../providers';
 import { releaseWorker, runScript, type ScriptResult } from '../runtime';
 import { uid } from '../storage';
-import {
-  dirAt,
-  ensureParent,
-  ensureWorkspace,
-  fileAt,
-  formatSize,
-  freePath,
-  normalizePath,
-  walk,
-  workspacePath,
-  type WorkspaceEntry,
-} from '../workspace';
+import { formatSize, type Workspace, type WorkspaceEntry } from '../workspace';
 import { describeCall } from './describe';
 import { extractZipDocument, ZIP_DOCUMENT_EXT } from './documents';
 import { forgetObserved, isObserved, markObserved, requireObserved } from './observe';
@@ -47,6 +37,8 @@ export type ToolContext = {
   step?: string;
   /** Estimated token budget for the history. */
   budget: number;
+  /** The folder the chat's file tools work in. */
+  workspace: Workspace;
 };
 
 type Tool = ToolSpec & { run: (input: any, ctx: ToolContext) => Promise<ToolOutcome> };
@@ -119,23 +111,22 @@ function isBinary(bytes: Uint8Array) {
 }
 
 /** Snapshot of the workspace for spotting what a shell command or script changed. */
-function snapshot() {
-  return new Map(walk().map((e) => [e.path, `${e.modified}:${e.size}`]));
+function snapshot(ws: Workspace) {
+  return new Map(ws.walk().map((e) => [e.path, `${e.modified}:${e.size}`]));
 }
 
-function changedSince(before: Map<string, string>) {
-  return walk()
+function changedSince(ws: Workspace, before: Map<string, string>) {
+  return ws
+    .walk()
     .filter((e) => before.get(e.path) !== `${e.modified}:${e.size}`)
     .map((e) => e.path);
 }
 
-function existing(path: string) {
-  const file = fileAt(path);
+function existing(ws: Workspace, path: string) {
+  const file = ws.fileAt(path);
   if (!file.exists) {
-    const dir = dirAt(path);
-    throw new ToolError(
-      dir.exists ? `"${normalizePath(path)}" is a folder; use list_files.` : `No such file: "${normalizePath(path)}".`
-    );
+    const rel = ws.normalizePath(path);
+    throw new ToolError(ws.dirAt(path).exists ? `"${rel}" is a folder; use list_files.` : `No such file: "${rel}".`);
   }
   return file;
 }
@@ -164,7 +155,7 @@ function numbered(text: string, offset: number, limit: number) {
   return { body: out.join('\n') + more, total: lines.length };
 }
 
-async function readPdf(path: string, offset: number, limit: number, signal: AbortSignal) {
+async function readPdf(ws: Workspace, path: string, offset: number, limit: number, signal: AbortSignal) {
   const code = `
 import json, pypdf
 reader = pypdf.PdfReader(${JSON.stringify(path)})
@@ -178,7 +169,7 @@ for i in range(start - 1, end):
 if end < total:
     print(f"\\n[Pass offset={end + 1} to read further pages.]")
 `;
-  const r = await runScript({ lang: 'python', code, packages: ['pypdf'], timeoutMs: 120_000, signal });
+  const r = await runScript({ lang: 'python', code, packages: ['pypdf'], timeoutMs: 120_000, signal, workspace: ws });
   if (r.error) {
     throw new ToolError(
       `Could not extract the PDF's text: ${r.error}\nWrite a run_python script (pypdf, pdfminer.six or pymupdf) to process it instead.`
@@ -206,9 +197,9 @@ const readFile: Tool = {
     },
     required: ['path'],
   },
-  async run(input, { signal }) {
-    const path = normalizePath(str(input.path, 'path'));
-    const file = existing(path);
+  async run(input, { signal, workspace: ws }) {
+    const path = ws.normalizePath(str(input.path, 'path'));
+    const file = existing(ws, path);
     const offset = Math.max(1, Number(input.offset) || 1);
 
     if (IMAGE_EXT.test(path)) {
@@ -216,7 +207,7 @@ const readFile: Tool = {
       return { output: `Image ${path} (${formatSize(file.size)}, shown as ${image.width}×${image.height}).`, images: [image] };
     }
     if (/\.pdf$/i.test(path)) {
-      return { output: clip(await readPdf(path, offset, Math.max(1, Number(input.limit) || 30), signal)) };
+      return { output: clip(await readPdf(ws, path, offset, Math.max(1, Number(input.limit) || 30), signal)) };
     }
     if (ZIP_DOCUMENT_EXT.test(path)) {
       let text: string;
@@ -263,13 +254,13 @@ const writeFile: Tool = {
     },
     required: ['path', 'content'],
   },
-  async run(input, { conversationId }) {
-    const path = normalizePath(str(input.path, 'path'));
+  async run(input, { conversationId, workspace: ws }) {
+    const path = ws.normalizePath(str(input.path, 'path'));
     const content = typeof input.content === 'string' ? input.content : str(input.content, 'content', false);
-    if (dirAt(path).exists && path) throw new ToolError(`"${path}" is a folder.`);
+    if (ws.dirAt(path).exists && path) throw new ToolError(`"${path}" is a folder.`);
     requireObserved(conversationId, path, 'overwrite');
-    ensureParent(path);
-    const file = fileAt(path);
+    ws.ensureParent(path);
+    const file = ws.fileAt(path);
     const existed = file.exists;
     await file.write(content, input.encoding === 'base64' ? { encoding: 'base64' } : undefined);
     return { output: `${existed ? 'Overwrote' : 'Created'} ${path} (${formatSize(file.size)}).`, files: [path] };
@@ -292,9 +283,9 @@ const editFile: Tool = {
     },
     required: ['path', 'old_string', 'new_string'],
   },
-  async run(input, { conversationId }) {
-    const path = normalizePath(str(input.path, 'path'));
-    const file = existing(path);
+  async run(input, { conversationId, workspace: ws }) {
+    const path = ws.normalizePath(str(input.path, 'path'));
+    const file = existing(ws, path);
     requireObserved(conversationId, path, 'edit');
     const oldString = str(input.old_string, 'old_string');
     const newString = typeof input.new_string === 'string' ? input.new_string : '';
@@ -314,15 +305,15 @@ const deletePath: Tool = {
   name: 'delete_path',
   description: 'Delete a workspace file or folder (folders are deleted with everything in them).',
   parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-  async run(input, { conversationId }) {
-    const path = normalizePath(str(input.path, 'path'));
+  async run(input, { conversationId, workspace: ws }) {
+    const path = ws.normalizePath(str(input.path, 'path'));
     if (!path) throw new ToolError('Refusing to delete the whole workspace.');
-    const dir = dirAt(path);
+    const dir = ws.dirAt(path);
     if (dir.exists) {
       dir.delete();
       return { output: `Deleted folder ${path}.` };
     }
-    existing(path).delete();
+    existing(ws, path).delete();
     forgetObserved(conversationId, [path]);
     return { output: `Deleted ${path}.` };
   },
@@ -340,17 +331,17 @@ const movePath: Tool = {
     },
     required: ['from', 'to'],
   },
-  async run(input, { conversationId }) {
-    const from = normalizePath(str(input.from, 'from'));
-    const to = normalizePath(str(input.to, 'to'));
+  async run(input, { conversationId, workspace: ws }) {
+    const from = ws.normalizePath(str(input.from, 'from'));
+    const to = ws.normalizePath(str(input.to, 'to'));
     if (!from || !to) throw new ToolError('Both paths must be inside the workspace and not the root.');
-    const dir = dirAt(from);
-    const source = dir.exists ? dir : existing(from);
+    const dir = ws.dirAt(from);
+    const source = dir.exists ? dir : existing(ws, from);
     if (!dir.exists) requireObserved(conversationId, to, 'overwrite');
     // The model knows the destination's contents only if it knew the source's.
     const known = !dir.exists && isObserved(conversationId, from);
-    ensureParent(to);
-    const target = dir.exists ? dirAt(to) : fileAt(to);
+    ws.ensureParent(to);
+    const target = dir.exists ? ws.dirAt(to) : ws.fileAt(to);
     if (input.copy) source.copySync(target, { overwrite: true });
     else source.moveSync(target, { overwrite: true });
     if (!input.copy) forgetObserved(conversationId, [from]);
@@ -372,14 +363,14 @@ const listFiles: Tool = {
       pattern: { type: 'string', description: 'Glob to match file paths recursively.' },
     },
   },
-  async run(input) {
-    ensureWorkspace();
-    const path = normalizePath(typeof input.path === 'string' ? input.path : '');
-    const dir = dirAt(path);
+  async run(input, { workspace: ws }) {
+    ws.ensure();
+    const path = ws.normalizePath(typeof input.path === 'string' ? input.path : '');
+    const dir = ws.dirAt(path);
     if (!dir.exists) throw new ToolError(`No such folder: "${path || '/'}".`);
     if (input.pattern) {
       const re = globToRegex(String(input.pattern));
-      const matches = walk(path).filter((e) => re.test(e.path));
+      const matches = ws.walk(path).filter((e) => re.test(e.path));
       if (!matches.length) return { output: `No files match ${input.pattern}.` };
       return { output: clip(matches.slice(0, 1000).map((e) => `${e.path}  (${formatSize(e.size)})`).join('\n')) };
     }
@@ -406,7 +397,7 @@ const searchFiles: Tool = {
     },
     required: ['pattern'],
   },
-  async run(input) {
+  async run(input, { workspace: ws }) {
     let re: RegExp;
     try {
       re = new RegExp(str(input.pattern, 'pattern'), input.ignore_case ? 'i' : '');
@@ -414,13 +405,13 @@ const searchFiles: Tool = {
       throw new ToolError(`Invalid regular expression: ${e instanceof Error ? e.message : e}`);
     }
     const only = input.glob ? globToRegex(String(input.glob)) : null;
-    const files: WorkspaceEntry[] = walk(typeof input.path === 'string' ? input.path : '').filter(
+    const files: WorkspaceEntry[] = ws.walk(typeof input.path === 'string' ? input.path : '').filter(
       (e) => e.size <= MAX_TEXT_BYTES && !SKIP_SEARCH_EXT.test(e.path) && (!only || only.test(e.path))
     );
     const out: string[] = [];
     let total = 0;
     for (const e of files) {
-      const bytes = await fileAt(e.path).bytes();
+      const bytes = await ws.fileAt(e.path).bytes();
       if (isBinary(bytes)) continue;
       const lines = new TextDecoder().decode(bytes).split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
@@ -500,6 +491,7 @@ const runPython: Tool = {
         timeoutMs: seconds(input.timeout_seconds, worker ? 600 : 120, 1800),
         signal,
         worker,
+        workspace: ctx.workspace,
       });
       return { output: scriptReport(r), isError: !!r.error, files: r.written };
     };
@@ -536,6 +528,7 @@ const runJavaScript: Tool = {
         timeoutMs: seconds(input.timeout_seconds, worker ? 600 : 60, 1800),
         signal,
         worker,
+        workspace: ctx.workspace,
       });
       return { output: scriptReport(r), isError: !!r.error, files: r.written };
     };
@@ -563,26 +556,26 @@ const runShell: Tool = {
   },
   async run(input, ctx) {
     const command = str(input.command, 'command');
-    if (!input.background) return shell(command, seconds(input.timeout_seconds, 60, 1800), ctx.signal);
+    if (!input.background) return shell(ctx.workspace, command, seconds(input.timeout_seconds, 60, 1800), ctx.signal);
     return background(ctx, 'run_shell', command.split('\n')[0].slice(0, 60), (signal) =>
-      shell(command, seconds(input.timeout_seconds, 600, 1800), signal)
+      shell(ctx.workspace, command, seconds(input.timeout_seconds, 600, 1800), signal)
     );
   },
 };
 
-async function shell(command: string, timeoutMs: number, signal: AbortSignal): Promise<ToolOutcome> {
+async function shell(ws: Workspace, command: string, timeoutMs: number, signal: AbortSignal): Promise<ToolOutcome> {
   if (!ClankerShell) throw new ToolError('The shell is not available in this build of the app.');
-  ensureWorkspace();
+  ws.ensure();
   const id = uid();
-  const before = snapshot();
+  const before = snapshot(ws);
   const onAbort = () => ClankerShell!.kill(id);
   signal.addEventListener('abort', onAbort);
   let r;
   try {
     const tmp = new Directory(Paths.cache, 'shell-tmp');
     if (!tmp.exists) tmp.create({ intermediates: true });
-    r = await ClankerShell.exec(id, command, workspacePath(), timeoutMs, {
-      HOME: workspacePath(),
+    r = await ClankerShell.exec(id, command, ws.path(), timeoutMs, {
+      HOME: ws.path(),
       TMPDIR: decodeURIComponent(tmp.uri.replace(/^file:\/\//, '')).replace(/\/+$/, ''),
     });
   } finally {
@@ -593,7 +586,7 @@ async function shell(command: string, timeoutMs: number, signal: AbortSignal): P
   if (r.stderr) parts.push(`[stderr]\n${r.stderr.replace(/\n$/, '')}`);
   if (r.truncated) parts.push('[output past 256 KB was dropped]');
   parts.push(r.timedOut ? '[timed out; the process was killed]' : `[exit code: ${r.exitCode}]`);
-  return { output: clip(parts.join('\n\n')), isError: r.timedOut || r.exitCode !== 0, files: changedSince(before) };
+  return { output: clip(parts.join('\n\n')), isError: r.timedOut || r.exitCode !== 0, files: changedSince(ws, before) };
 }
 
 // ---- background jobs -----------------------------------------------------------------------
@@ -711,12 +704,12 @@ const webFetch: Tool = {
     },
     required: ['url'],
   },
-  async run(input, { conversationId, signal }) {
+  async run(input, { conversationId, signal, workspace: ws }) {
     const url = str(input.url, 'url').trim();
     if (!/^https?:\/\//i.test(url)) throw new ToolError('Only http and https URLs can be fetched.');
-    const saveAs = input.save_as ? normalizePath(str(input.save_as, 'save_as')) : '';
+    const saveAs = input.save_as ? ws.normalizePath(str(input.save_as, 'save_as')) : '';
     if (saveAs) {
-      if (dirAt(saveAs).exists) throw new ToolError(`"${saveAs}" is a folder.`);
+      if (ws.dirAt(saveAs).exists) throw new ToolError(`"${saveAs}" is a folder.`);
       requireObserved(conversationId, saveAs, 'overwrite');
     }
     const res = await download(url, signal, MAX_DOWNLOAD_BYTES, saveAs ? 300_000 : 60_000);
@@ -725,9 +718,9 @@ const webFetch: Tool = {
 
     if (!textual) {
       if (!res.ok) throw new ToolError(`HTTP ${res.status} from ${res.url}.`);
-      const path = saveAs || freePath(res.filename, 'downloads');
-      ensureParent(path);
-      const file = fileAt(path);
+      const path = saveAs || ws.freePath(res.filename, 'downloads');
+      ws.ensureParent(path);
+      const file = ws.fileAt(path);
       await file.write(res.bytes);
       return {
         output: `Saved ${res.url} to ${path} (${formatSize(file.size)}${res.type ? `, ${res.type}` : ''}).${
@@ -853,8 +846,8 @@ const contextStatusTool: Tool = {
 
 // ---- memory -------------------------------------------------------------------------------
 
-const memoryById = (id: unknown) => {
-  const memory = useMemory.getState().memories.find((m) => m.id === id);
+const memoryById = (conversationId: string, id: unknown) => {
+  const memory = memoryInPool(conversationId, id);
   if (!memory) throw new ToolError(`No memory "${id}". Saved memories and their ids are in the system prompt and the context note.`);
   return memory;
 };
@@ -865,7 +858,7 @@ const memorySave: Tool = {
     'Save a fact about the user to memory, so future chats know it. One short, self-contained fact per call, in the third person (e.g. "Works as a nurse on night shifts"). Returns its id.',
   parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
   async run(input, { conversationId }) {
-    const id = useMemory.getState().add(str(input.text, 'text'), 'model', conversationId);
+    const id = useMemory.getState().add(str(input.text, 'text'), 'model', conversationId, memoryPool(conversationId));
     return { output: `Saved as memory ${id}.` };
   },
 };
@@ -878,8 +871,8 @@ const memoryUpdate: Tool = {
     properties: { id: { type: 'string' }, text: { type: 'string', description: 'The new text.' } },
     required: ['id', 'text'],
   },
-  async run(input) {
-    const memory = memoryById(input.id);
+  async run(input, { conversationId }) {
+    const memory = memoryById(conversationId, input.id);
     useMemory.getState().update(memory.id, str(input.text, 'text'));
     return { output: `Updated memory ${memory.id}.` };
   },
@@ -889,8 +882,8 @@ const memoryForget: Tool = {
   name: 'memory_forget',
   description: 'Delete a saved memory that is wrong, out of date, or that the user wants forgotten.',
   parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
-  async run(input) {
-    const memory = memoryById(input.id);
+  async run(input, { conversationId }) {
+    const memory = memoryById(conversationId, input.id);
     useMemory.getState().remove(memory.id);
     return { output: `Forgot memory ${memory.id} ("${memory.text}").` };
   },
@@ -925,8 +918,8 @@ const readChatTool: Tool = {
     },
     required: ['chat_id'],
   },
-  async run(input) {
-    return { output: clip(readChat(str(input.chat_id, 'chat_id'), Math.max(0, Number(input.offset) || 0))) };
+  async run(input, { conversationId }) {
+    return { output: clip(readChat(conversationId, str(input.chat_id, 'chat_id'), Math.max(0, Number(input.offset) || 0))) };
   },
 };
 
@@ -994,7 +987,7 @@ export function availableTools(conversationId: string | null): ToolSpec[] {
   }));
 }
 
-export async function executeTool(call: ToolCall, ctx: Omit<ToolContext, 'callId'>): Promise<ToolOutcome> {
+export async function executeTool(call: ToolCall, ctx: Omit<ToolContext, 'callId' | 'workspace'>): Promise<ToolOutcome> {
   const tool = TOOLS.find((t) => t.name === call.name);
   if (!tool || !enabled(tool, ctx.conversationId)) {
     return { output: `Unknown tool "${call.name}".`, isError: true };
@@ -1004,7 +997,7 @@ export async function executeTool(call: ToolCall, ctx: Omit<ToolContext, 'callId
   }
   try {
     const input = jobsOn() ? call.input : { ...call.input, background: undefined };
-    const outcome = await tool.run(input, { ...ctx, callId: call.id });
+    const outcome = await tool.run(input, { ...ctx, callId: call.id, workspace: workspaceFor(ctx.conversationId) });
     if (!outcome.isError) {
       // What the model has now seen as it is: anything it read, and anything it or its scripts wrote.
       const read = call.name === 'read_file' && typeof call.input.path === 'string' ? [call.input.path] : [];

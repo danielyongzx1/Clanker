@@ -46,7 +46,7 @@ export default function SettingsScreen() {
   const compression = useSettings((s) => s.compression);
   const memory = useSettings((s) => s.memory);
   const setMemory = useSettings((s) => s.setMemory);
-  const memoryCount = useMemory((s) => s.memories.length);
+  const memoryCount = useMemory((s) => s.memories.filter((m) => !m.projectId).length);
 
   const { on, total } = countOn(disabledTools);
 

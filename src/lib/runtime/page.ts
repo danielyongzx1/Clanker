@@ -1,8 +1,9 @@
 /**
  * The page inside the hidden runtime WebView. Python (Pyodide) and JavaScript each run in their
  * own Web Worker so a runaway script can be killed by terminating the worker. Each worker keeps a
- * copy of the workspace: the app sends files that changed since the last run, and the worker
- * reports back the files the script created, changed or deleted.
+ * copy of a workspace: the app sends files that changed since the last run (with reset set when
+ * the run is for another workspace, so the old copy is wiped first), and the worker reports back
+ * the files the script created, changed or deleted.
  */
 
 export const PYODIDE_URL = 'https://cdn.jsdelivr.net/pyodide/v0.27.7/full/';
@@ -104,7 +105,22 @@ function walk(dir, prefix, out) {
   return out;
 }
 
-function applyFiles(files, deleted) {
+function wipe(dir) {
+  for (const name of py.FS.readdir(dir)) {
+    if (name === '.' || name === '..') continue;
+    const full = dir + '/' + name;
+    if (py.FS.isDir(py.FS.stat(full).mode)) {
+      wipe(full);
+      py.FS.rmdir(full);
+    } else py.FS.unlink(full);
+  }
+}
+
+function applyFiles(files, deleted, reset) {
+  if (reset) {
+    py.runPython('import os; os.chdir("/")');
+    wipe('/workspace');
+  }
   for (const rel of deleted) {
     try { py.FS.unlink('/workspace/' + rel); } catch {}
   }
@@ -126,7 +142,7 @@ onmessage = async (e) => {
       throw x;
     });
     await ready;
-    applyFiles(m.files, m.deleted);
+    applyFiles(m.files, m.deleted, m.reset);
     before = walk('/workspace', '', {});
     // Installer progress isn't the script's output; only failures are worth reporting.
     py.setStdout({ batched: () => {} });
@@ -219,6 +235,7 @@ const AsyncFunction = (async () => {}).constructor;
 
 onmessage = async (e) => {
   const m = e.data;
+  if (m.reset) store.clear();
   for (const rel of m.deleted) store.delete(rel);
   for (const rel in m.files) store.set(rel, b64ToBytes(m.files[rel]));
   dirty = new Set();

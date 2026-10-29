@@ -4,7 +4,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import type { FilePart, ImagePart } from './providers';
 import { uid } from './storage';
-import { ensureWorkspace, fileAt, freePath } from './workspace';
+import type { Workspace } from './workspace';
 
 // Anthropic recommends a long edge of at most 1568px; other providers downscale anyway.
 const MAX_EDGE = 1568;
@@ -34,14 +34,14 @@ export function deleteAttachment(file: string) {
 }
 
 /** Copies an attachment into the agent workspace under its own name, returning the workspace path. */
-export function saveToWorkspace(part: FilePart | ImagePart) {
-  ensureWorkspace();
+export function saveToWorkspace(ws: Workspace, part: FilePart | ImagePart) {
+  ws.ensure();
   const name = part.type === 'image' ? 'photo.jpg' : sanitize(part.name);
-  const path = freePath(name);
+  const path = ws.freePath(name);
   if (part.type === 'file' && part.text != null && !part.file) {
-    fileAt(path).writeSync(part.text);
+    ws.fileAt(path).writeSync(part.text);
   } else if (part.file) {
-    new File(dir, part.file).copySync(fileAt(path));
+    new File(dir, part.file).copySync(ws.fileAt(path));
   }
   return path;
 }
@@ -108,7 +108,7 @@ function isTextLike(name: string, mimeType?: string) {
 }
 
 /** Keeps a name readable in the attachments dir without letting odd characters into paths. */
-function sanitize(name: string) {
+export function sanitize(name: string) {
   const clean = name.replace(/[/\:*?"<>|]/g, '-').replace(/^\.+/, '').slice(-80);
   return clean || 'file';
 }

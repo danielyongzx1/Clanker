@@ -34,6 +34,8 @@ interface SettingsState {
   tools: boolean;
   /** Tools the user turned off one by one, by name. */
   disabledTools: string[];
+  /** Rounds of tool calls a reply may make before it is stopped, or null for no limit. */
+  maxSteps: number | null;
   /** Whether the composer shows a context usage meter while typing. */
   contextUsage: boolean;
   /** Whether models with tools also get web search and fetch. */
@@ -51,6 +53,7 @@ interface SettingsState {
   setEffort: (ref: ModelRef, level: string) => void;
   setTools: (on: boolean) => void;
   setToolsEnabled: (names: string[], on: boolean) => void;
+  setMaxSteps: (steps: number | null) => void;
   setContextUsage: (on: boolean) => void;
   setWeb: (on: boolean) => void;
   setSearch: (search: SearchConfig) => void;
@@ -68,6 +71,7 @@ export const useSettings = create<SettingsState>()(
       efforts: {},
       tools: true,
       disabledTools: [],
+      maxSteps: null,
       contextUsage: false,
       web: true,
       search: { provider: 'firecrawl' },
@@ -104,6 +108,7 @@ export const useSettings = create<SettingsState>()(
         const rest = get().disabledTools.filter((n) => !names.includes(n));
         set({ disabledTools: on ? rest : [...rest, ...names] });
       },
+      setMaxSteps: (maxSteps) => set({ maxSteps }),
       setContextUsage: (contextUsage) => set({ contextUsage }),
       setWeb: (web) => set({ web }),
       setSearch: (search) => set({ search }),

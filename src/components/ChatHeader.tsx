@@ -5,7 +5,10 @@ import { useTheme } from '@/lib/theme';
 
 type Props = {
   title: string;
-  onMenu: () => void;
+  /** Opens the sidebar; shown when there is no `onBack`. */
+  onMenu?: () => void;
+  /** Given on a project's chat: a back button to the project in place of the sidebar button. */
+  onBack?: () => void;
   onTitle: () => void;
   onNewChat?: () => void;
   /** Memory is off for this chat (or the one about to be started). */
@@ -14,7 +17,7 @@ type Props = {
   onToggleMemory?: () => void;
 };
 
-export function ChatHeader({ title, onMenu, onTitle, onNewChat, memoryOff, onToggleMemory }: Props) {
+export function ChatHeader({ title, onMenu, onBack, onTitle, onNewChat, memoryOff, onToggleMemory }: Props) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const circle = [styles.circle, { backgroundColor: colors.chrome, borderColor: colors.chromeBorder }];
@@ -23,18 +26,29 @@ export function ChatHeader({ title, onMenu, onTitle, onNewChat, memoryOff, onTog
     // Transparent and floating over the message list; the chat screen paints a fade behind it.
     // Touches between the buttons fall through so the list still scrolls from there.
     <View pointerEvents="box-none" style={[styles.header, { paddingTop: insets.top + 6 }]}>
-      <Pressable
-        onPress={onMenu}
-        hitSlop={6}
-        style={({ pressed }) => [circle, pressed && { opacity: 0.6 }]}
-        accessibilityLabel="Open sidebar"
-      >
-        {/* ChatGPT's two-bar menu glyph */}
-        <View style={{ width: 20 }}>
-          <View style={[styles.bar, { width: 20, backgroundColor: colors.text }]} />
-          <View style={[styles.bar, { width: 13, backgroundColor: colors.text, marginTop: 5 }]} />
-        </View>
-      </Pressable>
+      {onBack ? (
+        <Pressable
+          onPress={onBack}
+          hitSlop={6}
+          style={({ pressed }) => [circle, pressed && { opacity: 0.6 }]}
+          accessibilityLabel="Back to project"
+        >
+          <Feather name="arrow-left" size={22} color={colors.text} />
+        </Pressable>
+      ) : (
+        <Pressable
+          onPress={onMenu}
+          hitSlop={6}
+          style={({ pressed }) => [circle, pressed && { opacity: 0.6 }]}
+          accessibilityLabel="Open sidebar"
+        >
+          {/* ChatGPT's two-bar menu glyph */}
+          <View style={{ width: 20 }}>
+            <View style={[styles.bar, { width: 20, backgroundColor: colors.text }]} />
+            <View style={[styles.bar, { width: 13, backgroundColor: colors.text, marginTop: 5 }]} />
+          </View>
+        </Pressable>
+      )}
 
       {/* Styled like ChatGPT's Chat/Work toggle; the highlighted segment is the active model. */}
       <View pointerEvents="box-none" style={styles.center}>

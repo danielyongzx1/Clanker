@@ -1,44 +1,50 @@
 import { useChats } from '@/store/chats';
-import { fileAt, normalizePath } from '../workspace';
+import { workspaceFor } from '../projects';
+import type { Workspace } from '../workspace';
 
 /**
  * The read-before-write policy. Each chat remembers the version (mtime:size) of every workspace
  * file the model has read or written. write_file won't overwrite, and edit_file won't edit, a file
- * the model hasn't seen, or one that changed since it last did.
+ * the model hasn't seen, or one that changed since it last did. Chats in a project share a
+ * workspace but not what they've seen, so a file another chat changed must be read again.
  */
 
-export function signature(path: string) {
-  const file = fileAt(path);
+export function signature(ws: Workspace, path: string) {
+  const file = ws.fileAt(path);
   return file.exists ? `${file.modificationTime ?? 0}:${file.size}` : null;
 }
 
 /** Records the current versions of `paths` as seen by the model in this chat. */
 export function markObserved(conversationId: string, paths: string[]) {
   if (!paths.length) return;
+  const ws = workspaceFor(conversationId);
   const entries: Record<string, string | null> = {};
   for (const path of paths) {
-    const rel = normalizePath(path);
-    entries[rel] = signature(rel);
+    const rel = ws.normalizePath(path);
+    entries[rel] = signature(ws, rel);
   }
   useChats.getState().observe(conversationId, entries);
 }
 
 export function forgetObserved(conversationId: string, paths: string[]) {
   if (!paths.length) return;
-  useChats.getState().observe(conversationId, Object.fromEntries(paths.map((p) => [normalizePath(p), null])));
+  const ws = workspaceFor(conversationId);
+  useChats.getState().observe(conversationId, Object.fromEntries(paths.map((p) => [ws.normalizePath(p), null])));
 }
 
 /** Whether the model has seen the file as it is now. */
 export function isObserved(conversationId: string, path: string) {
-  const rel = normalizePath(path);
+  const ws = workspaceFor(conversationId);
+  const rel = ws.normalizePath(path);
   const seen = useChats.getState().conversations[conversationId]?.observed?.[rel];
-  return !!seen && seen === signature(rel);
+  return !!seen && seen === signature(ws, rel);
 }
 
 /** Throws unless the model may change `path`: it doesn't exist yet, or the model has seen it as it is now. */
 export function requireObserved(conversationId: string, path: string, action: 'overwrite' | 'edit') {
-  const rel = normalizePath(path);
-  const current = signature(rel);
+  const ws = workspaceFor(conversationId);
+  const rel = ws.normalizePath(path);
+  const current = signature(ws, rel);
   if (!current) return;
   const seen = useChats.getState().conversations[conversationId]?.observed?.[rel];
   if (!seen) {
@@ -47,6 +53,8 @@ export function requireObserved(conversationId: string, path: string, action: 'o
     );
   }
   if (seen !== current) {
-    throw new Error(`${rel} changed since you last read it (a script, the shell or the user modified it). Read it again before you ${action} it.`);
+    throw new Error(
+      `${rel} changed since you last read it (a script, the shell, another chat or the user modified it). Read it again before you ${action} it.`
+    );
   }
 }
