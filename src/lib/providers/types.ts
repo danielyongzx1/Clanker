@@ -159,6 +159,8 @@ export interface Endpoint {
   name: string;
   type: ProviderType;
   baseUrl: string;
+  /** Other addresses for the same server, such as a LAN IP and a public one; requests use whichever answers first. */
+  altBaseUrls?: string[];
   models: string[];
   /** Reasoning effort levels each model accepts, lowest first. Models missing here have no effort control. */
   efforts?: Record<string, string[]>;

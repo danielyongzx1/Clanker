@@ -9,6 +9,7 @@ import {
   guessEfforts,
   PRESETS,
   PROVIDER_LABELS,
+  resolveBaseUrl,
   type EffortParam,
   type Endpoint,
   type ProviderType,
@@ -43,6 +44,7 @@ export default function EndpointScreen() {
   const [name, setName] = useState(existing?.name ?? '');
   const [type, setType] = useState<ProviderType>(existing?.type ?? 'openai');
   const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? '');
+  const [altUrls, setAltUrls] = useState<string[]>(existing?.altBaseUrls ?? []);
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [models, setModels] = useState<string[]>(existing?.models ?? []);
@@ -65,11 +67,14 @@ export default function EndpointScreen() {
     if (existing) apiKeys.get(existing.id).then((k) => k && setApiKey(k));
   }, [existing]);
 
+  const alts = altUrls.map((u) => u.trim()).filter(Boolean);
+
   const draft = (): Endpoint => ({
     id: existing?.id ?? uid(),
     name: name.trim() || PROVIDER_LABELS[type],
     type,
     baseUrl: baseUrl.trim(),
+    ...(alts.length ? { altBaseUrls: alts } : {}),
     models,
     efforts: Object.fromEntries(models.flatMap((m) => (efforts[m]?.length ? [[m, efforts[m]]] : []))),
     contexts: Object.fromEntries(models.flatMap((m) => (contexts[m] ? [[m, contexts[m]]] : []))),
@@ -81,6 +86,7 @@ export default function EndpointScreen() {
   const applyPreset = (preset: (typeof PRESETS)[number]) => {
     setType(preset.type);
     setBaseUrl(preset.baseUrl);
+    setAltUrls([]);
     setName(preset.name === 'Custom' ? '' : preset.name);
     setModels([]);
     setEfforts({});
@@ -90,13 +96,17 @@ export default function EndpointScreen() {
     setStatus(null);
   };
 
+  // Names the URL that answered, when there's more than one to pick from.
+  const via = async (endpoint: Endpoint) => (alts.length ? ` (via ${await resolveBaseUrl(endpoint)})` : '');
+
   const fetchModels = async () => {
     if (!baseUrl.trim()) return setStatus({ ok: false, text: 'Enter a base URL first.' });
     setBusy('fetch');
     setStatus(null);
     try {
+      const endpoint = draft();
       const { models: list, effortParam: detected } = await getAdapter(type).listModels(
-        draft(),
+        endpoint,
         apiKey.trim() || undefined
       );
       setModels(list.map((m) => m.id));
@@ -111,7 +121,8 @@ export default function EndpointScreen() {
         ok: true,
         text:
           `Found ${list.length} model${list.length === 1 ? '' : 's'}` +
-          (withEffort ? `, ${withEffort} with effort levels.` : '.'),
+          (withEffort ? `, ${withEffort} with effort levels` : '') +
+          `${await via(endpoint)}.`,
       });
     } catch (e) {
       setStatus({ ok: false, text: e instanceof Error ? e.message : String(e) });
@@ -127,16 +138,20 @@ export default function EndpointScreen() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
     let reply = '';
+    const endpoint = draft();
     try {
       await getAdapter(type).stream({
-        endpoint: draft(),
+        endpoint,
         apiKey: apiKey.trim() || undefined,
         model: models[0],
         signal: controller.signal,
         messages: [{ role: 'user', text: 'Reply with exactly one word: OK', images: [] }],
         onToken: (t) => (reply += t),
       });
-      setStatus({ ok: true, text: `${models[0]} replied: ${reply.trim().slice(0, 80) || '(empty)'}` });
+      setStatus({
+        ok: true,
+        text: `${models[0]} replied${await via(endpoint)}: ${reply.trim().slice(0, 80) || '(empty)'}`,
+      });
     } catch (e) {
       const text = controller.signal.aborted ? 'Timed out after 30 seconds.' : e instanceof Error ? e.message : String(e);
       setStatus({ ok: false, text });
@@ -245,6 +260,31 @@ export default function EndpointScreen() {
         {(type === 'ollama' || baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) && (
           <Text style={[styles.hint, { color: colors.textTertiary }]}>
             On a phone, use your computer&apos;s LAN IP instead of localhost, and start Ollama with OLLAMA_HOST=0.0.0.0.
+          </Text>
+        )}
+
+        {altUrls.map((url, i) => (
+          <View key={i} style={[styles.addRow, { marginTop: 8 }]}>
+            <Input
+              value={url}
+              onChangeText={(text) => setAltUrls(altUrls.map((u, j) => (j === i ? text : u)))}
+              placeholder="Alternative URL, e.g. http://203.0.113.5:11434"
+              keyboardType="url"
+              style={{ flex: 1 }}
+            />
+            <Pressable onPress={() => setAltUrls(altUrls.filter((_, j) => j !== i))} hitSlop={8} style={styles.removeUrl}>
+              <Feather name="x" size={16} color={colors.textTertiary} />
+            </Pressable>
+          </View>
+        ))}
+        <Pressable onPress={() => setAltUrls([...altUrls, ''])} hitSlop={6} style={styles.addUrl}>
+          <Feather name="plus" size={16} color={colors.link} />
+          <Text style={{ color: colors.link, fontSize: 15, fontWeight: '500' }}>Add alternative URL</Text>
+        </Pressable>
+        {altUrls.length > 0 && (
+          <Text style={[styles.hint, { color: colors.textTertiary }]}>
+            Other addresses for the same server, such as its LAN IP at home and a public IP or domain for when
+            you&apos;re out. Clanker checks them all and uses whichever answers first.
           </Text>
         )}
 
@@ -459,6 +499,8 @@ const styles = StyleSheet.create({
   modelsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
   inlineButton: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   addRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  addUrl: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 10, marginHorizontal: 4 },
+  removeUrl: { width: 32, height: 44, alignItems: 'center', justifyContent: 'center' },
   addButton: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   modelList: { borderRadius: 12, marginTop: 8, overflow: 'hidden' },
   modelRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12 },
