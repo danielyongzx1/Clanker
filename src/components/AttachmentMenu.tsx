@@ -1,6 +1,7 @@
 import Feather from '@expo/vector-icons/Feather';
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
+import { OverKeyboardView } from 'react-native-keyboard-controller';
 import Animated, {
   Easing,
   Extrapolation,
@@ -41,8 +42,9 @@ type Props = {
 
 /**
  * Popover anchored to the composer's plus button: the card fades/scales up from the button's
- * corner and its rows cascade in. Rendered in a transparent Modal so it paints over the
- * keyboard layer and is never clipped by the composer box (which has overflow: hidden).
+ * corner and its rows cascade in. Rendered in an over-keyboard layer (not a Modal, which grabs
+ * focus and closes the keyboard) so it paints over the keyboard layer, is never clipped by the
+ * composer box (which has overflow: hidden), and leaves the keyboard exactly where it is.
  */
 export function AttachmentMenu({ visible, x, bottom, onPick, onClose }: Props) {
   const { colors } = useTheme();
@@ -50,6 +52,16 @@ export function AttachmentMenu({ visible, x, bottom, onPick, onClose }: Props) {
   // Stay mounted through the exit animation; unmount only when it has played out.
   const [mounted, setMounted] = useState(visible);
   if (visible && !mounted) setMounted(true);
+
+  // The layer hosts no activity of its own, so back must be routed here while the menu is up.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onClose]);
 
   const open = useSharedValue(0);
   useEffect(() => {
@@ -79,10 +91,11 @@ export function AttachmentMenu({ visible, x, bottom, onPick, onClose }: Props) {
 
   if (!mounted) return null;
   return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
+    <OverKeyboardView visible={mounted}>
       {/* Transparent: it only catches taps outside the card. No dimming, like the reference. */}
       <Pressable
         style={StyleSheet.absoluteFill}
+        pointerEvents={visible ? 'auto' : 'none'}
         onPress={visible ? onClose : undefined}
         accessibilityLabel="Close attach menu"
       />
@@ -105,7 +118,7 @@ export function AttachmentMenu({ visible, x, bottom, onPick, onClose }: Props) {
           ))}
         </View>
       </Animated.View>
-    </Modal>
+    </OverKeyboardView>
   );
 }
 

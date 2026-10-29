@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Dimensions, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
+import { OverKeyboardView } from 'react-native-keyboard-controller';
 import Animated, { Easing, interpolate, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { formatTokens } from '@/lib/context';
@@ -51,12 +52,24 @@ type PopoverProps = {
   onClose: () => void;
 };
 
-/** Breakdown of the context estimate, popping up from the composer's right-hand corner. */
+/** Breakdown of the context estimate, popping up from the composer's right-hand corner.
+ *  Lives in an over-keyboard layer (not a Modal, which grabs focus and closes the keyboard),
+ *  so it floats over the keys and leaves them open. */
 export function ContextPopover({ visible, usage, right, bottom, onClose }: PopoverProps) {
   const { colors } = useTheme();
   const reduceMotion = useReducedMotion();
   const [mounted, setMounted] = useState(visible);
   if (visible && !mounted) setMounted(true);
+
+  // The layer hosts no activity of its own, so back must be routed here while it is up.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onClose]);
 
   const open = useSharedValue(0);
   useEffect(() => {
@@ -91,9 +104,10 @@ export function ContextPopover({ visible, usage, right, bottom, onClose }: Popov
   const width = Math.min(CARD_WIDTH, Dimensions.get('window').width - 24);
 
   return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
+    <OverKeyboardView visible={mounted}>
       <Pressable
         style={StyleSheet.absoluteFill}
+        pointerEvents={visible ? 'auto' : 'none'}
         onPress={visible ? onClose : undefined}
         accessibilityLabel="Close context usage"
       />
@@ -139,7 +153,7 @@ export function ContextPopover({ visible, usage, right, bottom, onClose }: Popov
           </Text>
         </View>
       </Animated.View>
-    </Modal>
+    </OverKeyboardView>
   );
 }
 

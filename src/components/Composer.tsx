@@ -4,7 +4,6 @@ import { Image } from 'expo-image';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type HostInstance, type TextInputInstance } from 'react-native';
 import Animated, { Easing, interpolate, useAnimatedStyle, withTiming, type SharedValue } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AttachmentMenu, type AttachAction } from '@/components/AttachmentMenu';
 import { attachmentUri, deleteAttachment, pickFiles, pickImages } from '@/lib/attachments';
 import { ContextMeter, ContextPopover } from '@/components/ContextUsage';
@@ -24,8 +23,6 @@ const COLLAPSED = { margin: 36, padLeft: TOOLBAR_PAD + BUTTON + 2, padRight: TOO
 const EXPANDED = { margin: 12, padLeft: 16, padRight: 16, padBottom: ROW - 6 };
 const TWEEN = { duration: 280, easing: Easing.bezier(0.2, 0, 0, 1) };
 const TOOLBAR_GAP = 4;
-// Height of the horizontal attachment strip (thumb row) added above the text: 12 + 64 + 2.
-const THUMB_ROW = 78;
 // Tap target around the context meter; it only takes room in the toolbar while expanded.
 const METER = 16;
 
@@ -54,7 +51,6 @@ type Props = {
 
 export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboardVisible, effort, context, progress }: Props) {
   const { colors } = useTheme();
-  const insets = useSafeAreaInsets();
   const [attachments, setAttachments] = useState<AttachmentPart[]>([]);
   const [importing, setImporting] = useState(false);
   const images = attachments.filter((a): a is ImagePart => a.type === 'image');
@@ -117,22 +113,12 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
     }
   };
 
-  // Popovers float above the box. With no keyboard they anchor where the box measures to sit;
-  // with the keyboard up the box will collapse to a known layout under the keyboard, so they
-  // anchor there while the keyboard retreats.
+  // Popovers float above the box, anchored where it measures to sit. They live in an
+  // over-keyboard layer, so opening one with the keyboard up leaves the keyboard right where
+  // it is (a plain Modal would take focus and close it, and dismissing made the box collapse
+  // out from under the menu).
   const openPopover = (which: 'attach' | 'context') => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (keyboardVisible) {
-      const collapsedH = ROW + (attachments.length > 0 || importing ? THUMB_ROW : 0);
-      setAnchor({
-        x: COLLAPSED.margin + TOOLBAR_PAD,
-        right: COLLAPSED.margin,
-        bottom: collapsedH + Math.max(insets.bottom, 8) + 8,
-      });
-      Keyboard.dismiss();
-      setPopover(which);
-      return;
-    }
     box.current?.measureInWindow((x, y, width) => {
       const window = Dimensions.get('window');
       setAnchor({ x: x + TOOLBAR_PAD, right: window.width - x - width, bottom: window.height - y + 8 });
