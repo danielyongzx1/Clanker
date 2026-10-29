@@ -12,7 +12,7 @@ import type { ImagePart, Source, ToolCall, ToolSpec } from '../providers';
 import { releaseWorker, runScript, type ScriptResult } from '../runtime';
 import { uid } from '../storage';
 import { formatSize, type Workspace, type WorkspaceEntry } from '../workspace';
-import { describeCall } from './describe';
+import { describeCall, lineChanges } from './describe';
 import { extractZipDocument, ZIP_DOCUMENT_EXT } from './documents';
 import { forgetObserved, isObserved, markObserved, requireObserved } from './observe';
 import { download, htmlToMarkdown, renderPage, SEARCH_PROVIDERS, searchWeb } from './web';
@@ -1009,4 +1009,4 @@ export async function executeTool(call: ToolCall, ctx: Omit<ToolContext, 'callId
   }
 }
 
-export { describeCall };
+export { describeCall, lineChanges };

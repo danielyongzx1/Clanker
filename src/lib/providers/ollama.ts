@@ -30,7 +30,7 @@ export const ollama: ProviderAdapter = {
     return { models };
   },
 
-  async stream({ endpoint, apiKey, model, messages, system, effort, tools, signal, onToken, onReasoning }) {
+  async stream({ endpoint, apiKey, model, messages, system, effort, tools, signal, onToken, onReasoning, onToolDraft }) {
     const body = {
       model,
       stream: true,
@@ -62,11 +62,13 @@ export const ollama: ProviderAdapter = {
       for (const tc of json.message?.tool_calls ?? []) {
         if (!tc.function?.name) continue;
         const args = tc.function.arguments;
-        toolCalls.push({
+        const call = {
           id: tc.id ?? `call_${uid()}`,
           name: tc.function.name,
           input: typeof args === 'string' ? safeParse(args) : (args ?? {}),
-        });
+        };
+        onToolDraft?.({ index: toolCalls.length, id: call.id, name: call.name, args: JSON.stringify(call.input) });
+        toolCalls.push(call);
       }
       if (json.done) break;
     }

@@ -1,11 +1,12 @@
-import { interruptTool, messageText, useChats } from '@/store/chats';
+import { interruptContent, messageText, useChats } from '@/store/chats';
 import { resolveBudget, resolveEffort, useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
 import { readAttachmentBase64, saveToWorkspace } from './attachments';
 import { autoCompress, buildWire, historyOf, historyTokens, unitsOf } from './context';
 import { ensureMemoryBase, extractMemories, memoryOn } from './memory';
 import { workspaceFor } from './projects';
-import { getAdapter, ProviderError, type AttachmentPart, type Endpoint, type ToolPart } from './providers';
+import { parsePartialJson } from './partialJson';
+import { getAdapter, ProviderError, type AttachmentPart, type Endpoint, type ToolCallDraft, type ToolPart } from './providers';
 import { apiKeys, uid } from './storage';
 import { availableTools, executeTool } from './tools';
 import { markObserved } from './tools/observe';
@@ -23,6 +24,12 @@ function isOverflow(e: unknown) {
   return /context.{0,20}(length|window|limit|size)|too long|too many tokens|maximum.{0,30}(tokens|length)|token limit|exceeds?.{0,40}(context|tokens)|input length/i.test(
     e.message
   );
+}
+
+/** The arguments of a tool call the model is still writing, as far as they parse. */
+function draftInput(args: string): Record<string, unknown> {
+  const value = parsePartialJson(args);
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function fallbackTitle(text: string) {
@@ -109,6 +116,10 @@ async function runCompletion(id: string) {
   controllers.set(id, controller);
   let buffer = '';
   let reasoningBuffer = '';
+  // Tool calls the model is still writing in the current response, by stream index, with the id
+  // their part has in the reply. Shown as they grow, then swapped for the finished calls.
+  const drafts = new Map<number, { draft: ToolCallDraft; partId: string }>();
+  const changedDrafts = new Set<number>();
   let timer: ReturnType<typeof setTimeout> | null = null;
   const flush = () => {
     if (timer) clearTimeout(timer);
@@ -116,8 +127,16 @@ async function runCompletion(id: string) {
     const chats = useChats.getState();
     if (reasoningBuffer) chats.appendReasoning(id, replyId, reasoningBuffer);
     if (buffer) chats.appendText(id, replyId, buffer);
+    if (changedDrafts.size) {
+      const parts = [...changedDrafts].map((index): ToolPart => {
+        const { draft, partId } = drafts.get(index)!;
+        return { type: 'tool', id: partId, name: draft.name, input: draftInput(draft.args), status: 'writing' };
+      });
+      chats.putDrafts(id, replyId, parts);
+    }
     buffer = '';
     reasoningBuffer = '';
+    changedDrafts.clear();
   };
 
   // Wall time of the current stretch of thinking, recorded on its part when answer text or the
@@ -141,6 +160,14 @@ async function runCompletion(id: string) {
   const budget = resolveBudget(endpoint, conversation.model);
   const { compression } = useSettings.getState();
   const reply = () => useChats.getState().conversations[id]?.messages.find((m) => m.id === replyId);
+  // Ids of the reply's finished tool calls. Some servers reuse ids like "call_0" across responses;
+  // ids must be unique within the reply.
+  const takenIds = () =>
+    new Set(reply()?.content.flatMap((p) => (p.type === 'tool' && p.status !== 'writing' ? [p.id] : [])));
+  const settleDrafts = (parts: ToolPart[]) => {
+    drafts.clear();
+    useChats.getState().settleDrafts(id, replyId, parts);
+  };
 
   // Attachments and tool images are re-sent every step; read each file once per reply.
   const base64Cache = new Map<string, string | null>();
@@ -196,6 +223,15 @@ async function runCompletion(id: string) {
               reasoningBuffer += token;
               timer ??= setTimeout(flush, FLUSH_MS);
             },
+            onToolDraft: (draft) => {
+              streamed = true;
+              markThoughtDone();
+              const partId =
+                drafts.get(draft.index)?.partId ?? (takenIds().has(draft.id) ? `${draft.id}_${uid()}` : draft.id);
+              drafts.set(draft.index, { draft, partId });
+              changedDrafts.add(draft.index);
+              timer ??= setTimeout(flush, FLUSH_MS);
+            },
           });
           break;
         } catch (e) {
@@ -211,20 +247,25 @@ async function runCompletion(id: string) {
       }
       flush();
       markThoughtDone();
-      if (!tools || !result.toolCalls.length) break;
+      if (!tools || !result.toolCalls.length) {
+        settleDrafts([]);
+        break;
+      }
       // Read every step, so setting a limit mid-reply can rein in a model that's spinning.
       const { maxSteps } = useSettings.getState();
       if (maxSteps && step >= maxSteps) {
+        settleDrafts([]);
         useChats.getState().appendText(id, replyId, `\n\n_Stopped after ${maxSteps} rounds of tool calls._`);
         break;
       }
 
-      // Some servers reuse ids like "call_0" across responses; ids must be unique within the reply.
-      const taken = new Set(reply()?.content.flatMap((p) => (p.type === 'tool' ? [p.id] : [])));
+      const taken = takenIds();
+      // A finished call keeps its draft's id, so its row stays as it was (opened or not).
+      const drafted = new Map([...drafts.values()].map((d) => [d.draft.id, d.partId]));
       const stepId = uid();
       const calls = result.toolCalls.map((c, i): ToolPart => ({
         type: 'tool',
-        id: taken.has(c.id) ? `${c.id}_${uid()}` : c.id,
+        id: drafted.get(c.id) ?? (taken.has(c.id) ? `${c.id}_${uid()}` : c.id),
         name: c.name,
         input: c.input,
         status: 'running',
@@ -232,7 +273,7 @@ async function runCompletion(id: string) {
         ...(c.signature ? { signature: c.signature } : {}),
         ...(i === 0 && result.thinking ? { thinking: result.thinking } : {}),
       }));
-      useChats.getState().appendParts(id, replyId, calls);
+      settleDrafts(calls);
       // One at a time: calls in a batch often depend on each other's files.
       for (const call of calls) {
         if (controller.signal.aborted) break;
@@ -259,7 +300,7 @@ async function runCompletion(id: string) {
   } catch (e) {
     flush();
     markThoughtDone();
-    const content = (reply()?.content ?? []).map(interruptTool);
+    const content = interruptContent(reply()?.content ?? []);
     if (controller.signal.aborted) {
       useChats.getState().updateMessage(id, replyId, { status: 'done', content });
     } else {

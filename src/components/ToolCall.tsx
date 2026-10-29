@@ -6,7 +6,7 @@ import { attachmentUri } from '@/lib/attachments';
 import { openWorkspaceFile, shareWorkspaceFile } from '@/lib/openFile';
 import type { ToolPart } from '@/lib/providers';
 import { fonts, useTheme } from '@/lib/theme';
-import { describeCall } from '@/lib/tools';
+import { describeCall, lineChanges } from '@/lib/tools';
 import type { Workspace } from '@/lib/workspace';
 import { useWorkspace } from '@/lib/useWorkspace';
 import { CodeBlock } from './CodeBlock';
@@ -70,22 +70,25 @@ const basename = (path: string) => path.split('/').pop() ?? path;
 function CallInput({ part }: { part: ToolPart }) {
   const { colors } = useTheme();
   const input = part.input;
+  // While the model is still writing the call, the code shows its growing end.
+  const live = part.status === 'writing';
   if ((part.name === 'run_python' || part.name === 'run_javascript') && typeof input.code === 'string') {
-    return <CodeBlock code={input.code} language={part.name === 'run_python' ? 'python' : 'javascript'} />;
+    return <CodeBlock code={input.code} language={part.name === 'run_python' ? 'python' : 'javascript'} live={live} />;
   }
   if (part.name === 'run_shell' && typeof input.command === 'string') {
-    return <CodeBlock code={input.command} language="bash" />;
+    return <CodeBlock code={input.command} language="bash" live={live} />;
   }
   if (part.name === 'write_file' && typeof input.content === 'string' && input.encoding !== 'base64') {
     const ext = String(input.path ?? '').split('.').pop()?.toLowerCase() ?? '';
-    const code = input.content.length > 20_000 ? input.content.slice(0, 20_000) + '\n…' : input.content;
-    return <CodeBlock code={code} language={LANGUAGES[ext]} />;
+    const code = !live && input.content.length > 20_000 ? input.content.slice(0, 20_000) + '\n…' : input.content;
+    return <CodeBlock code={code} language={LANGUAGES[ext]} live={live} />;
   }
   if (part.name === 'edit_file') {
     return (
       <CodeBlock
         code={`- ${String(input.old_string ?? '').replace(/\n/g, '\n- ')}\n+ ${String(input.new_string ?? '').replace(/\n/g, '\n+ ')}`}
         language="diff"
+        live={live}
       />
     );
   }
@@ -133,10 +136,13 @@ function ToolCallInner({ part }: { part: ToolPart }) {
   const { colors } = useTheme();
   const [open, setOpen] = useState(false);
   const job = part.background;
+  const writing = part.status === 'writing';
   // A background job's row tracks the job, not the call that started it.
-  const running = part.status === 'running' || job?.status === 'running';
+  const running = writing || part.status === 'running' || job?.status === 'running';
   const failed = part.status === 'error' || job?.status === 'error';
   const output = job?.output ?? part.output;
+  const label = describeCall(part.name, part.input);
+  const changes = lineChanges(part.name, part.input);
 
   return (
     <View style={styles.container}>
@@ -144,13 +150,15 @@ function ToolCallInner({ part }: { part: ToolPart }) {
         onPress={() => setOpen(!open)}
         hitSlop={4}
         accessibilityRole="button"
-        accessibilityLabel={`${describeCall(part.name, part.input)}, ${running ? 'running' : failed ? 'failed' : 'done'}`}
+        accessibilityLabel={`${label}, ${writing ? 'writing' : running ? 'running' : failed ? 'failed' : 'done'}`}
         style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}
       >
         <Feather name={ICONS[part.name] ?? 'tool'} size={14} color={failed ? colors.danger : colors.textSecondary} />
         <Text numberOfLines={1} style={[styles.label, { color: failed ? colors.danger : colors.textSecondary }]}>
-          {describeCall(part.name, part.input)}
+          {label}
         </Text>
+        {!!changes?.added && <Text style={[styles.meta, { color: colors.success }]}>+{changes.added}</Text>}
+        {!!changes?.removed && <Text style={[styles.meta, { color: colors.danger }]}>−{changes.removed}</Text>}
         {job && <Text style={[styles.meta, { color: colors.textTertiary }]}>{JOB_LABELS[job.status]}</Text>}
         {running ? (
           <ActivityIndicator size="small" color={colors.textTertiary} style={styles.spinner} />

@@ -44,7 +44,11 @@ export type ToolPart = {
   id: string;
   name: string;
   input: Record<string, unknown>;
-  status: 'running' | 'done' | 'error';
+  /**
+   * `writing` while the model is still streaming the call: `input` is what it has written so far.
+   * Such parts are replaced by the finished calls when the response ends, and dropped if it fails.
+   */
+  status: 'writing' | 'running' | 'done' | 'error';
   /** What the model sees as the result. */
   output?: string;
   /** Images returned to the model (e.g. read_file on a photo), stored in the attachments dir. */
@@ -102,6 +106,15 @@ export type ToolCall = {
   name: string;
   input: Record<string, unknown>;
   signature?: string;
+};
+
+/** A tool call as far as the model has streamed it. `index` tells the calls of one response apart. */
+export type ToolCallDraft = {
+  index: number;
+  id: string;
+  name: string;
+  /** The JSON arguments so far, likely cut off partway. */
+  args: string;
 };
 
 export type WireToolResult = {
@@ -173,6 +186,8 @@ export interface StreamOptions {
   onToken: (text: string) => void;
   /** Streams the model's reasoning/thinking output, when the provider exposes it. */
   onReasoning?: (text: string) => void;
+  /** Reports each tool call as it streams in, before the response ends; called again as it grows. */
+  onToolDraft?: (draft: ToolCallDraft) => void;
 }
 
 /**

@@ -35,7 +35,7 @@ export const gemini: ProviderAdapter = {
     return { models };
   },
 
-  async stream({ endpoint, apiKey, model, messages, system, effort, tools, signal, onToken, onReasoning }) {
+  async stream({ endpoint, apiKey, model, messages, system, effort, tools, signal, onToken, onReasoning, onToolDraft }) {
     const body = {
       ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
       ...(effort ? { generationConfig: { thinkingConfig: thinkingConfig(model, effort) } } : {}),
@@ -62,12 +62,15 @@ export const gemini: ProviderAdapter = {
       if (json.error) throw new Error(json.error.message ?? 'Stream error');
       for (const part of json.candidates?.[0]?.content?.parts ?? []) {
         if (part.functionCall) {
-          toolCalls.push({
+          const call = {
             id: part.functionCall.id ?? `call_${uid()}`,
             name: part.functionCall.name,
             input: part.functionCall.args ?? {},
             signature: part.thoughtSignature,
-          });
+          };
+          // Calls arrive whole, but the rest of the response may still be streaming.
+          onToolDraft?.({ index: toolCalls.length, id: call.id, name: call.name, args: JSON.stringify(call.input) });
+          toolCalls.push(call);
         }
         if (!part.text) continue;
         // Thought summaries from thinking models stream with `thought: true`.

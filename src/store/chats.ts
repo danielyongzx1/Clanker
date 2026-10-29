@@ -110,8 +110,11 @@ interface ChatsState {
   appendReasoning: (id: string, messageId: string, text: string) => void;
   /** Records how long the reply's latest thought part took. */
   finishThought: (id: string, messageId: string, ms: number) => void;
-  appendParts: (id: string, messageId: string, parts: ContentPart[]) => void;
   patchTool: (id: string, messageId: string, toolId: string, patch: Partial<ToolPart>) => void;
+  /** Updates tool calls still being written in place, by id, and appends the ones that are new. */
+  putDrafts: (id: string, messageId: string, drafts: ToolPart[]) => void;
+  /** Replaces the calls still being written with `parts`, where the first of them was. */
+  settleDrafts: (id: string, messageId: string, parts: ContentPart[]) => void;
   setCompressions: (id: string, blocks: CompressionBlock[]) => void;
   setNote: (id: string, key: string, note: ContextNote) => void;
   setMemoryBase: (id: string, memories: Memory[]) => void;
@@ -119,6 +122,11 @@ interface ChatsState {
   observe: (id: string, entries: Record<string, string | null>) => void;
   /** Removes the message with `messageId` and everything after it. */
   truncateFrom: (id: string, messageId: string) => void;
+}
+
+/** A tool call the model is still writing. */
+function isDraft(part: ContentPart): boolean {
+  return part.type === 'tool' && part.status === 'writing';
 }
 
 function imagesOf(messages: Message[]) {
@@ -228,11 +236,29 @@ export const useChats = create<ChatsState>()(
             if (index < 0) return {};
             return { content: m.content.map((p, i) => (i === index ? { ...p, ms } : p)) };
           }),
-        appendParts: (id, messageId, parts) => patchMessage(id, messageId, (m) => ({ content: [...m.content, ...parts] })),
         patchTool: (id, messageId, toolId, patch) =>
           patchMessage(id, messageId, (m) => ({
             content: m.content.map((p) => (p.type === 'tool' && p.id === toolId ? { ...p, ...patch } : p)),
           })),
+        putDrafts: (id, messageId, drafts) =>
+          patchMessage(id, messageId, (m) => {
+            const byId = new Map(drafts.map((d) => [d.id, d]));
+            const content = m.content.map((p) => {
+              const draft = p.type === 'tool' && isDraft(p) && byId.get(p.id);
+              if (!draft) return p;
+              byId.delete(draft.id);
+              return draft;
+            });
+            return { content: [...content, ...byId.values()] };
+          }),
+        settleDrafts: (id, messageId, parts) =>
+          patchMessage(id, messageId, (m) => {
+            const first = m.content.findIndex(isDraft);
+            if (first < 0) return { content: [...m.content, ...parts] };
+            const before = m.content.slice(0, first);
+            const after = m.content.slice(first).filter((p) => !isDraft(p));
+            return { content: [...before, ...parts, ...after] };
+          }),
         setCompressions: (id, compressions) => patchConversation(id, () => ({ compressions })),
         setNote: (id, key, note) => patchConversation(id, (c) => ({ notes: { ...c.notes, [key]: note } })),
         setMemoryBase: (id, memoryBase) => patchConversation(id, () => ({ memoryBase })),
@@ -273,7 +299,7 @@ export const useChats = create<ChatsState>()(
             const content = m.content.map((p) =>
               p.type === 'tool' && p.background?.status === 'running' ? { ...p, background: { ...p.background, status: 'lost' as const } } : p
             );
-            return m.status === 'streaming' ? { ...m, status: 'done', content: content.map(interruptTool) } : { ...m, content };
+            return m.status === 'streaming' ? { ...m, status: 'done', content: interruptContent(content) } : { ...m, content };
           });
         }
         return { ...current, conversations };
@@ -282,11 +308,18 @@ export const useChats = create<ChatsState>()(
   )
 );
 
-/** Marks a tool call that never got a result as failed, so the history stays valid for the API. */
-export function interruptTool(part: ContentPart): ContentPart {
-  return part.type === 'tool' && part.status === 'running'
-    ? { ...part, status: 'error', output: part.output ?? 'Interrupted before it finished.' }
-    : part;
+/**
+ * Settles a reply that stopped partway, so the history stays valid for the API: tool calls that
+ * never got a result are marked failed, and calls the model never finished writing are dropped.
+ */
+export function interruptContent(content: ContentPart[]): ContentPart[] {
+  return content
+    .filter((p) => !isDraft(p))
+    .map((p) =>
+      p.type === 'tool' && p.status === 'running'
+        ? { ...p, status: 'error', output: p.output ?? 'Interrupted before it finished.' }
+        : p
+    );
 }
 
 export function messageText(message: Pick<Message, 'content'>) {

@@ -81,7 +81,7 @@ export const anthropic: ProviderAdapter = {
     };
   },
 
-  async stream({ endpoint, apiKey, model, messages, system, effort, tools, signal, onToken, onReasoning }) {
+  async stream({ endpoint, apiKey, model, messages, system, effort, tools, signal, onToken, onReasoning, onToolDraft }) {
     // Anthropic only caches up to explicit breakpoints. History is append-only, so mark the end of
     // this request and the end of the previous one (the user turn before), so each request reads
     // what the last one wrote; the system prompt gets one too, shared by every chat.
@@ -118,7 +118,10 @@ export const anthropic: ProviderAdapter = {
       if (event.type === 'error') throw new Error(event.error?.message ?? 'Stream error');
       if (event.type === 'content_block_start') {
         const block = event.content_block;
-        if (block?.type === 'tool_use') blocks[event.index] = { type: 'tool_use', id: block.id, name: block.name, json: '' };
+        if (block?.type === 'tool_use') {
+          blocks[event.index] = { type: 'tool_use', id: block.id, name: block.name, json: '' };
+          onToolDraft?.({ index: event.index, id: block.id, name: block.name, args: '' });
+        }
         if (block?.type === 'thinking') blocks[event.index] = { type: 'thinking', thinking: block.thinking ?? '', signature: '' };
         // Redacted thinking is opaque, but has to be replayed like the rest.
         if (block?.type === 'redacted_thinking') thinking.push(block);
@@ -127,7 +130,10 @@ export const anthropic: ProviderAdapter = {
         const block = blocks[event.index];
         const delta = event.delta;
         if (delta?.type === 'text_delta') onToken(delta.text);
-        if (delta?.type === 'input_json_delta' && block) block.json += delta.partial_json ?? '';
+        if (delta?.type === 'input_json_delta' && block) {
+          block.json += delta.partial_json ?? '';
+          onToolDraft?.({ index: event.index, id: block.id, name: block.name, args: block.json });
+        }
         if (delta?.type === 'signature_delta' && block) block.signature += delta.signature ?? '';
         // Summarized thinking streams as summary_delta instead of thinking_delta.
         const thought = delta?.type === 'thinking_delta' ? delta.thinking : delta?.type === 'summary_delta' ? (delta.summary ?? delta.text) : '';

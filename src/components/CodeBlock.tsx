@@ -96,7 +96,20 @@ function highlight(code: string, language?: string): Root | null {
   return null;
 }
 
-function CodeBlockInner({ code, language }: { code: string; language?: string }) {
+const LIVE_LINES = 20;
+
+/** The last `LIVE_LINES` lines of `text`, found from the end so long text costs no more. */
+function tail(text: string) {
+  let at = text.length;
+  for (let i = 0; i < LIVE_LINES && at > 0; i++) at = text.lastIndexOf('\n', at - 1);
+  return at <= 0 ? text : '…' + text.slice(at);
+}
+
+/**
+ * `live` is for code still streaming in: only its end shows, unhighlighted, since highlighting and
+ * laying out all of it again on every update drops frames. It's highlighted whole once done.
+ */
+function CodeBlockInner({ code, language, live = false }: { code: string; language?: string; live?: boolean }) {
   const { colors, scheme } = useTheme();
   const palette = palettes[scheme];
   const [copied, setCopied] = useState(false);
@@ -104,9 +117,10 @@ function CodeBlockInner({ code, language }: { code: string; language?: string })
   const text = code.replace(/\n$/, '');
 
   const highlighted = useMemo(() => {
+    if (live) return tail(text);
     const tree = highlight(text, lang);
     return tree ? renderNodes(tree.children as ElementContent[], palette) : text;
-  }, [text, lang, palette]);
+  }, [text, lang, palette, live]);
 
   const copy = async () => {
     await Clipboard.setStringAsync(text);

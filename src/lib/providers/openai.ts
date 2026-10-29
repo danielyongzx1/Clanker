@@ -64,7 +64,7 @@ export const openai: ProviderAdapter = {
     return { models, effortParam };
   },
 
-  async stream({ endpoint, apiKey, model, messages, system, effort, tools, signal, onToken, onReasoning }) {
+  async stream({ endpoint, apiKey, model, messages, system, effort, tools, signal, onToken, onReasoning, onToolDraft }) {
     const body = {
       model,
       stream: true,
@@ -106,6 +106,8 @@ export const openai: ProviderAdapter = {
         if (tc.function?.arguments != null) {
           call.args += typeof tc.function.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function.arguments);
         }
+        // The id is made up here when the server sends none, so the draft and the finished call share it.
+        if (call.name) onToolDraft?.({ index, id: (call.id ??= `call_${uid()}`), name: call.name, args: call.args });
       }
     }
     const toolCalls: ToolCall[] = calls

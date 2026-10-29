@@ -1,5 +1,29 @@
 const short = (text: string) => (text.length > 60 ? `${text.slice(0, 60).trimEnd()}…` : text);
 
+const linesOf = (v: unknown) => (typeof v === 'string' && v ? v.replace(/\r?\n$/, '').split(/\r?\n/) : []);
+
+/**
+ * Lines a file write or edit adds and removes, for the "+3 −1" by its label. An edit's lines in
+ * common at the start and end of both strings don't count. Works on calls still being written.
+ */
+export function lineChanges(name: string, input: Record<string, unknown>) {
+  if (name === 'write_file' && input.encoding !== 'base64') return { added: linesOf(input.content).length, removed: 0 };
+  if (name !== 'edit_file') return null;
+  const before = linesOf(input.old_string);
+  const after = linesOf(input.new_string);
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  let end = 0;
+  while (
+    end < before.length - start &&
+    end < after.length - start &&
+    before[before.length - 1 - end] === after[after.length - 1 - end]
+  ) {
+    end++;
+  }
+  return { added: after.length - start - end, removed: before.length - start - end };
+}
+
 /** One-line label for a tool call, e.g. "Read report.pdf". */
 export function describeCall(name: string, input: Record<string, unknown>) {
   const p = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '');
