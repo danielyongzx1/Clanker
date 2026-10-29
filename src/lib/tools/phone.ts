@@ -1,10 +1,23 @@
-import { Platform } from 'react-native';
+import { AppRegistry, Platform } from 'react-native';
 import { ClankerPhone, type PhoneElement, type PhoneScreen } from '../../../modules/clanker-phone';
-import { importAsset } from '../attachments';
+import { MAX_EDGE, storeJpeg } from '../attachments';
 import type { Tool, ToolOutcome } from './index';
 
 // Chats whose current reply has used the phone, so the overlay knows when to show "Done".
 const using = new Set<string>();
+
+// React Native pauses JS timers while its activity is in the background, which would stall every
+// wait, timeout and save while the agent works in another app. A headless task keeps them running;
+// native starts it when the phone is first used and it lasts until the last reply using it ends.
+const KEEP_ALIVE_TASK = 'ClankerPhoneKeepAlive';
+let releases: (() => void)[] = [];
+
+AppRegistry.registerHeadlessTask(KEEP_ALIVE_TASK, () => () =>
+  new Promise<void>((resolve) => {
+    if (using.size) releases.push(resolve);
+    else resolve();
+  })
+);
 
 /** Whether this build can control the phone at all (Android, with the native module). */
 export const phoneSupported = () => Platform.OS === 'android' && !!ClankerPhone;
@@ -23,6 +36,9 @@ export function onPhoneStop(stop: (conversationId: string) => void) {
 export function endPhoneRun(conversationId: string, stopped: boolean) {
   if (!using.delete(conversationId) || using.size) return;
   void ClankerPhone?.setOverlay(stopped ? 'hidden' : 'done').catch(() => {});
+  void ClankerPhone?.keepAwake(false).catch(() => {});
+  releases.forEach((release) => release());
+  releases = [];
 }
 
 function phone(conversationId: string) {
@@ -31,6 +47,7 @@ function phone(conversationId: string) {
   }
   if (!using.has(conversationId)) {
     using.add(conversationId);
+    void ClankerPhone.keepAwake(true).catch(() => {});
     void ClankerPhone.setOverlay('working').catch(() => {});
   }
   return ClankerPhone;
@@ -115,10 +132,10 @@ const phoneScreen: Tool = {
     }
     const screen = await native(p.screen());
     if (!input.screenshot) return { output: listing(screen) };
-    const shot = await native(p.screenshot());
-    const image = await importAsset(shot);
-    const width = image.width ?? shot.width;
-    const height = image.height ?? shot.height;
+    // Scaled natively, which saves decoding the full-size image in JS.
+    const shot = await native(p.screenshot(MAX_EDGE));
+    const image = await storeJpeg(shot);
+    const { width, height } = shot;
     const scale = screen.width / width;
     const note =
       Math.abs(scale - 1) < 0.01

@@ -11,8 +11,13 @@ import android.os.Build
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.ReactContext
+import com.facebook.react.jstasks.HeadlessJsTaskConfig
+import com.facebook.react.jstasks.HeadlessJsTaskContext
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.functions.Coroutine
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +29,8 @@ import java.io.FileOutputStream
 // More elements than this make the listing too long to be useful; the rest are dropped.
 private const val MAX_ELEMENTS = 300
 private const val MAX_TEXT = 200
+// Registered in JS (src/lib/tools/phone.ts); runs for as long as the agent is using the phone.
+private const val KEEP_ALIVE_TASK = "ClankerPhoneKeepAlive"
 
 class PhoneException(message: String) : CodedException(message)
 
@@ -39,6 +46,7 @@ class ScreenshotFailure(val errorCode: Int) : CodedException(
 class ClankerPhoneModule : Module() {
   // The nodes of the last `screen` listing, by index, for the actions to refer to.
   @Volatile private var nodes: List<AccessibilityNodeInfo> = emptyList()
+  private var keepAliveTask = -1
 
   private val context: Context
     get() = appContext.reactContext ?: throw PhoneException("The app context is gone.")
@@ -67,8 +75,12 @@ class ClankerPhoneModule : Module() {
       withContext(Dispatchers.IO) { snapshot(service) }
     }
 
-    /** A JPEG of the whole screen in the cache folder, without the overlay. */
-    AsyncFunction("screenshot") Coroutine { ->
+    /**
+     * A JPEG of the whole screen in the cache folder, without the overlay, scaled down to `maxEdge`.
+     * Done here rather than in JS because the image manipulator's loader stalls while Clanker is in
+     * the background.
+     */
+    AsyncFunction("screenshot") Coroutine { maxEdge: Int ->
       val service = service()
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) throw PhoneException("Screenshots need Android 11 or later.")
       service.onMain { service.setOverlayVisible(false) }
@@ -87,11 +99,16 @@ class ClankerPhoneModule : Module() {
         service.onMain { service.setOverlayVisible(true) }
       }
       withContext(Dispatchers.IO) {
+        val scale = minOf(1f, maxEdge.toFloat() / maxOf(bitmap.width, bitmap.height))
+        val scaled = if (scale < 1f) {
+          Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+        } else bitmap
         val dir = File(context.cacheDir, "phone-shots").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
         val file = File(dir, "${System.currentTimeMillis()}.jpg")
-        FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }
-        val result = mapOf("uri" to "file://${file.absolutePath}", "width" to bitmap.width, "height" to bitmap.height)
+        FileOutputStream(file).use { scaled.compress(Bitmap.CompressFormat.JPEG, 80, it) }
+        val result = mapOf("uri" to "file://${file.absolutePath}", "width" to scaled.width, "height" to scaled.height)
+        if (scaled !== bitmap) scaled.recycle()
         bitmap.recycle()
         result
       }
@@ -238,6 +255,24 @@ class ClankerPhoneModule : Module() {
       service.awaitIdle(500, 4000)
       "Opened $pkg."
     }
+
+    /**
+     * Keeps JS timers running while Clanker is in the background. React Native pauses them with
+     * its activity unless a headless JS task is active, so while the agent works in other apps a
+     * long-lived task holds them on; `false` finishes it.
+     */
+    AsyncFunction("keepAwake") { on: Boolean ->
+      val react = appContext.reactContext as? ReactContext ?: return@AsyncFunction
+      val tasks = HeadlessJsTaskContext.getInstance(react)
+      if (on) {
+        if (!tasks.isTaskRunning(keepAliveTask)) {
+          keepAliveTask = tasks.startTask(HeadlessJsTaskConfig(KEEP_ALIVE_TASK, Arguments.createMap(), 0, true))
+        }
+      } else if (keepAliveTask >= 0) {
+        tasks.finishTask(keepAliveTask)
+        keepAliveTask = -1
+      }
+    }.runOnQueue(Queues.MAIN)
 
     /** "working", "done" or "hidden"; a no-op while the service is off. */
     AsyncFunction("setOverlay") Coroutine { state: String ->

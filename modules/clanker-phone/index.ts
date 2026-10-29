@@ -33,7 +33,8 @@ export type OverlayState = 'working' | 'done' | 'hidden';
 type ClankerPhoneModule = {
   isEnabled(): boolean;
   screen(): Promise<PhoneScreen>;
-  screenshot(): Promise<{ uri: string; width: number; height: number }>;
+  /** Scaled so its long edge is at most `maxEdge` pixels. */
+  screenshot(maxEdge: number): Promise<{ uri: string; width: number; height: number }>;
   /** Element numbers refer to the last `screen` listing. */
   tap(index: number, long: boolean): Promise<string>;
   tapAt(x: number, y: number, durationMs: number): Promise<string>;
@@ -46,6 +47,8 @@ type ClankerPhoneModule = {
   listApps(): Promise<PhoneApp[]>;
   launchApp(pkg: string): Promise<string>;
   setOverlay(state: OverlayState): Promise<void>;
+  /** Holds JS timers on while Clanker is in the background (see the `ClankerPhoneKeepAlive` task). */
+  keepAwake(on: boolean): Promise<void>;
   addListener(event: 'onStop', listener: () => void): EventSubscription;
 };
 

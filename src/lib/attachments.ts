@@ -7,7 +7,7 @@ import { uid } from './storage';
 import type { Workspace } from './workspace';
 
 // Anthropic recommends a long edge of at most 1568px; other providers downscale anyway.
-const MAX_EDGE = 1568;
+export const MAX_EDGE = 1568;
 // Inline text cap for picked documents; beyond it the model gets the head plus a truncation note.
 const MAX_TEXT_CHARS = 80_000;
 // Binary files above this are rejected rather than ballooned to base64 into a request body.
@@ -60,6 +60,13 @@ async function storeFrom(sourceUri: string, name: string) {
     const scheme = sourceUri.split('://')[0];
     throw new Error(`Could not copy "${name}" (source: ${scheme}://): ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+/** Copies a JPEG that is already small enough into the attachments dir, without decoding it. */
+export async function storeJpeg(image: { uri: string; width: number; height: number }): Promise<ImagePart> {
+  const name = `${uid()}.jpg`;
+  await storeFrom(image.uri, name);
+  return { type: 'image', file: name, mimeType: 'image/jpeg', width: image.width, height: image.height };
 }
 
 /** Downscales an image into the attachments dir as JPEG; also used for images agent tools return. */
