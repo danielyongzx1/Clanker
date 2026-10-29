@@ -4,6 +4,7 @@ import { Alert, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useDerivedValue, useSharedValue } from 'react-native-reanimated';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useShallow } from 'zustand/react/shallow';
 import { ChatHeader } from '@/components/ChatHeader';
 import { composerGrowth } from '@/components/Composer';
 import { COMPOSER_FADE, ComposerDock } from '@/components/ComposerDock';
@@ -42,7 +43,21 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
 
   const currentId = useUI((s) => s.currentId);
   const open = useUI((s) => s.open);
-  const conversation = useChats((s) => (currentId ? s.conversations[currentId] : undefined));
+  // Only what this screen shows itself. MessageList reads the messages, so a streaming reply
+  // re-renders the list rather than the header and composer with every token.
+  const conversation = useChats(
+    useShallow((s) => {
+      const c = currentId ? s.conversations[currentId] : undefined;
+      return c
+        ? {
+            memory: c.memory,
+            projectId: c.projectId,
+            empty: c.messages.length === 0,
+            streaming: c.messages.some((m) => m.status === 'streaming'),
+          }
+        : undefined;
+    })
+  );
   const active = useSettings((s) => s.active);
   const hasEndpoint = useSettings((s) => s.endpoints.some((e) => e.models.length > 0));
   const showUsage = useSettings((s) => s.contextUsage);
@@ -69,19 +84,17 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
   );
   const emptyInsetStyle = useAnimatedStyle(() => ({ paddingBottom: bottomInset.value }));
 
-  const messages = conversation?.messages ?? [];
-  const streaming = messages.some((m) => m.status === 'streaming');
+  const streaming = !!conversation?.streaming;
 
   // Reopening a chat switches back to the model it was using, as ChatGPT does.
   useEffect(() => {
+    const conversation = currentId ? useChats.getState().conversations[currentId] : undefined;
     if (!conversation) return;
     const { endpoints, setActive } = useSettings.getState();
     const endpoint = endpoints.find((e) => e.id === conversation.endpointId);
     if (endpoint?.models.includes(conversation.model)) {
       setActive({ endpointId: endpoint.id, model: conversation.model });
     }
-    // Only when switching conversations, not on every message update.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId]);
 
   const send = useCallback(
@@ -112,9 +125,9 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
         {/* An unpadded box, so the composer's absolute position isn't thrown off by the
             avoiding view's keyboard padding. */}
         <View style={styles.container}>
-          {messages.length > 0 ? (
+          {currentId && conversation && !conversation.empty ? (
             <MessageList
-              messages={messages}
+              conversationId={currentId}
               onRegenerate={onRegenerate}
               topInset={topInset}
               bottomInset={bottomInset}

@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/lib/theme';
-import { messageText, useChats, type Conversation } from '@/store/chats';
+import { messageText, useChatList, type Conversation } from '@/store/chats';
 import { useProjects, type Project } from '@/store/projects';
 import { useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
@@ -38,7 +38,7 @@ function groupByDate(conversations: Conversation[]): Section[] {
 export function Sidebar({ navigation }: DrawerContentComponentProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const conversations = useChats((s) => s.conversations);
+  const conversations = useChatList();
   const currentId = useUI((s) => s.currentId);
   const open = useUI((s) => s.open);
   const projects = useProjects((s) => s.projects);

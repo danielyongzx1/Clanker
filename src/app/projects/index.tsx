@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useProjectMenu } from '@/components/ProjectMenu';
 import { useTheme } from '@/lib/theme';
-import { useChats } from '@/store/chats';
+import { useChatList } from '@/store/chats';
 import { useProjects, type Project } from '@/store/projects';
 
 function projectDate(ms: number) {
@@ -18,7 +18,7 @@ function projectDate(ms: number) {
 export default function ProjectsScreen() {
   const { colors } = useTheme();
   const projects = useProjects((s) => s.projects);
-  const conversations = useChats((s) => s.conversations);
+  const conversations = useChatList();
   const [query, setQuery] = useState('');
   const { show, menu } = useProjectMenu();
 

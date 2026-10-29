@@ -1,6 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
-import { createJSONStorage, type StateStorage } from 'zustand/middleware';
+import { AppState } from 'react-native';
+import type { PersistStorage, StorageValue } from 'zustand/middleware';
 
 const dataDir = new Directory(Paths.document, 'data');
 
@@ -9,28 +10,39 @@ function fileFor(name: string) {
   return new File(dataDir, `${name}.json`);
 }
 
-const pending = new Map<string, string>();
+const WRITE_MS = 1000;
+
+const pending = new Map<string, StorageValue<unknown>>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 function flush() {
+  if (timer) clearTimeout(timer);
   timer = null;
-  for (const [name, value] of pending) fileFor(name).write(value);
+  for (const [name, value] of pending) fileFor(name).write(JSON.stringify(value));
   pending.clear();
 }
 
+// The app may be killed once it leaves the foreground, so waiting writes go out then.
+AppState.addEventListener('change', (state) => {
+  if (state !== 'active') flush();
+});
+
 /**
- * Zustand storage backed by JSON files in the document directory. Writes are
- * debounced so streaming tokens don't rewrite the whole history on every delta.
+ * Zustand storage backed by JSON files in the document directory. Writes are throttled, and the
+ * state is only serialized when it's written: serializing the whole history on every streamed
+ * token was what slowed the app most while a reply streamed.
  */
-const fileStorage: StateStorage = {
+export const jsonFileStorage: PersistStorage<any> = {
   getItem: (name) => {
-    if (pending.has(name)) return pending.get(name)!;
+    const value = pending.get(name);
+    // A copy, since rehydrating may change the state it's given.
+    if (value) return JSON.parse(JSON.stringify(value));
     const file = fileFor(name);
-    return file.exists ? file.textSync() : null;
+    return file.exists ? JSON.parse(file.textSync()) : null;
   },
   setItem: (name, value) => {
     pending.set(name, value);
-    timer ??= setTimeout(flush, 400);
+    timer ??= setTimeout(flush, WRITE_MS);
   },
   removeItem: (name) => {
     pending.delete(name);
@@ -38,8 +50,6 @@ const fileStorage: StateStorage = {
     if (file.exists) file.delete();
   },
 };
-
-export const jsonFileStorage = createJSONStorage(() => fileStorage);
 
 // SecureStore keys may only contain alphanumerics, ".", "-" and "_".
 const keyName = (endpointId: string) => `apikey_${endpointId}`;

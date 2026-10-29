@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { useChats } from '@/store/chats';
+import { useEffect, useMemo, useState } from 'react';
+import { useChats, type Conversation } from '@/store/chats';
 import { useMemory } from '@/store/memory';
 import { resolveBudget, useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
@@ -9,6 +9,41 @@ import { systemPrompt } from './tools/prompt';
 
 /** Estimated tokens the next request would send, by part, against the model's budget. */
 export type ContextUsage = { system: number; tools: number; messages: number; budget: number };
+
+const STREAM_REFRESH_MS = 1000;
+
+/**
+ * The conversation, kept current when a message is added or a reply ends but refreshed at most
+ * once a second while a reply streams in: counting the whole history's tokens on every streamed
+ * token (and re-rendering the screen with it) took frames from everything else.
+ */
+function useThrottledConversation(id: string | null) {
+  const read = () => (id ? useChats.getState().conversations[id] : undefined);
+  const [conversation, setConversation] = useState<Conversation | undefined>(read);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const refresh = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      setConversation(read());
+    };
+    refresh();
+    const shape = (c?: Conversation) => `${c?.messages.length}:${c?.messages.at(-1)?.status}`;
+    const unsubscribe = useChats.subscribe((s, prev) => {
+      const c = id ? s.conversations[id] : undefined;
+      const before = id ? prev.conversations[id] : undefined;
+      if (c === before) return;
+      if (shape(c) !== shape(before)) refresh();
+      else timer ??= setTimeout(refresh, STREAM_REFRESH_MS);
+    });
+    return () => {
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+  return conversation;
+}
 
 /**
  * Context usage of a chat (or the new-chat state) with the selected model, or null when `enabled`
@@ -22,7 +57,7 @@ export function useContextUsage(conversationId: string | null, enabled: boolean)
   const memory = useSettings((s) => s.memory);
   const memories = useMemory((s) => s.memories);
   const newChatMemoryOff = useUI((s) => s.newChatMemoryOff);
-  const conversation = useChats((s) => (conversationId ? s.conversations[conversationId] : undefined));
+  const conversation = useThrottledConversation(conversationId);
   const budget = endpoint && model ? resolveBudget(endpoint, model) : null;
 
   const replyId = conversation?.messages.find((m) => m.status === 'streaming')?.id;

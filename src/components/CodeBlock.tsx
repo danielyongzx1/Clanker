@@ -88,39 +88,80 @@ function renderNodes(nodes: ElementContent[], palette: Palette, keyPrefix = ''):
   });
 }
 
+// Past these sizes code stays plain: guessing its language runs every grammar over it, and
+// highlighting much more than that stalls the app for long enough to notice.
+const AUTO_MAX = 2000;
+const HIGHLIGHT_MAX = 20_000;
+
 function highlight(code: string, language?: string): Root | null {
   try {
+    if (code.length > HIGHLIGHT_MAX) return null;
     if (language && lowlight.registered(language)) return lowlight.highlight(language, code);
-    if (!language) return lowlight.highlightAuto(code);
+    if (!language && code.length <= AUTO_MAX) return lowlight.highlightAuto(code);
   } catch {}
   return null;
 }
 
 const LIVE_LINES = 20;
+// Nor more characters than this, for code with very long lines.
+const LIVE_CHARS = 2000;
 
 /** The last `LIVE_LINES` lines of `text`, found from the end so long text costs no more. */
 function tail(text: string) {
   let at = text.length;
   for (let i = 0; i < LIVE_LINES && at > 0; i++) at = text.lastIndexOf('\n', at - 1);
+  at = Math.max(at, text.length - LIVE_CHARS);
   return at <= 0 ? text : '…' + text.slice(at);
 }
 
+const CATCH_UP_LINES = 10;
+
+/** Where the last whole run of `CATCH_UP_LINES` lines in `text` ends. */
+function catchUpPoint(text: string) {
+  let cut = 0;
+  let lines = 0;
+  for (let at = text.indexOf('\n'); at >= 0; at = text.indexOf('\n', at + 1)) {
+    if (++lines % CATCH_UP_LINES === 0) cut = at + 1;
+  }
+  return cut;
+}
+
 /**
- * `live` is for code still streaming in: only its end shows, unhighlighted, since highlighting and
- * laying out all of it again on every update drops frames. It's highlighted whole once done.
+ * Highlighting and laying out all the code again on every update of code that's still streaming
+ * in drops frames. `live` code (a tool call being written) shows only its end, unhighlighted.
+ * `streaming` code (in an answer) shows whole, highlighted every `CATCH_UP_LINES` lines with the
+ * newest lines plain until then. Either is highlighted whole once done.
  */
-function CodeBlockInner({ code, language, live = false }: { code: string; language?: string; live?: boolean }) {
+function CodeBlockInner({
+  code,
+  language,
+  live = false,
+  streaming = false,
+}: {
+  code: string;
+  language?: string;
+  live?: boolean;
+  streaming?: boolean;
+}) {
   const { colors, scheme } = useTheme();
   const palette = palettes[scheme];
   const [copied, setCopied] = useState(false);
   const lang = language?.trim().split(/\s+/)[0]?.toLowerCase() || undefined;
   const text = code.replace(/\n$/, '');
 
+  // The part that's highlighted. A guessed language could change as more code comes in, so code
+  // without a known one waits until it's done.
+  const settled = live
+    ? ''
+    : !streaming
+      ? text
+      : lang && lowlight.registered(lang)
+        ? text.slice(0, catchUpPoint(text))
+        : '';
   const highlighted = useMemo(() => {
-    if (live) return tail(text);
-    const tree = highlight(text, lang);
-    return tree ? renderNodes(tree.children as ElementContent[], palette) : text;
-  }, [text, lang, palette, live]);
+    const tree = settled ? highlight(settled, lang) : null;
+    return tree ? renderNodes(tree.children as ElementContent[], palette) : settled;
+  }, [settled, lang, palette]);
 
   const copy = async () => {
     await Clipboard.setStringAsync(text);
@@ -139,7 +180,8 @@ function CodeBlockInner({ code, language, live = false }: { code: string; langua
       </View>
       <HorizontalScroll contentContainerStyle={styles.body}>
         <Text selectable style={[styles.code, { color: palette.base }]}>
-          {highlighted}
+          {live ? tail(text) : highlighted}
+          {!live && text.slice(settled.length)}
         </Text>
       </HorizontalScroll>
     </View>

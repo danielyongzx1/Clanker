@@ -1,6 +1,6 @@
-import { cloneElement, Fragment, isValidElement, memo, useMemo, type ReactNode } from 'react';
+import { cloneElement, Fragment, isValidElement, memo, useMemo, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View, type ImageStyle, type TextStyle, type ViewStyle } from 'react-native';
-import { Renderer, useMarkdown, type MarkedStyles } from 'react-native-marked';
+import { MarkedLexer, Renderer, useMarkdown, type MarkedStyles } from 'react-native-marked';
 import { fonts, useTheme, type Colors } from '@/lib/theme';
 import { Chart, parseChart } from './Chart';
 import { CodeBlock } from './CodeBlock';
@@ -53,7 +53,7 @@ class ChatRenderer extends Renderer {
       if (parseImages(text)) return <ImageCards key={this.getKey()} source={text} />;
       if (this.live) return <Pending key={this.getKey()} label="Loading images…" />;
     }
-    return <CodeBlock key={this.getKey()} code={text} language={language} />;
+    return <CodeBlock key={this.getKey()} code={text} language={language} streaming={this.live} />;
   }
 
   image(uri: string, alt?: string, _style?: ImageStyle, title?: string): ReactNode {
@@ -93,7 +93,43 @@ function markdownStyles(colors: Colors): MarkedStyles {
   };
 }
 
-function MarkdownInner({ value, live = false }: { value: string; live?: boolean }) {
+// A link reference definition ("[1]: https://…") serves links anywhere in the text, so text with
+// one is parsed whole rather than block by block.
+const REFERENCE = /^ {0,3}\[[^\]]+\]:/m;
+
+type Split = { text: string; blocks: string[] };
+
+/**
+ * The top-level blocks of `text` (each with the blank lines after it), reusing `prev`, the split of
+ * text it continues: of that, only the last block (which more text may still extend) is lexed
+ * again, so streamed text costs as much as its last block rather than all of it.
+ */
+function splitBlocks(text: string, prev: Split | null): string[] {
+  if (REFERENCE.test(text)) return [text];
+  const settled = prev && text.startsWith(prev.text) ? prev.blocks.slice(0, -1) : [];
+  let start = settled.reduce((n, b) => n + b.length, 0);
+  const rest = text.slice(start);
+  const tokens = MarkedLexer(rest, { gfm: true });
+  // A block is settled once another one starts after it; the last stays open.
+  const lastBlock = tokens.findLastIndex((t) => t.type !== 'space');
+  let at = 0;
+  let block = '';
+  for (let i = 0; i < lastBlock; i++) {
+    const raw = tokens[i].raw;
+    if (!rest.startsWith(raw, at)) break;
+    block += raw;
+    at += raw.length;
+    if (tokens[i + 1].type !== 'space' && block.trim()) {
+      settled.push(block);
+      start += block.length;
+      block = '';
+    }
+  }
+  return [...settled, text.slice(start)];
+}
+
+/** One top-level block, parsed again only when its own text changes. */
+const MarkdownBlock = memo(function MarkdownBlock({ value, live }: { value: string; live: boolean }) {
   const { colors, scheme } = useTheme();
   const styles = useMemo(() => markdownStyles(colors), [colors]);
   const theme = useMemo(
@@ -105,12 +141,28 @@ function MarkdownInner({ value, live = false }: { value: string; live?: boolean 
   renderer.reset();
   const elements = useMarkdown(value, { colorScheme: scheme, styles, theme, renderer });
   return (
-    <View>
+    <>
       {/* Blocks are keyed by position: the renderer keys a block after its children, so the block
           still streaming in would otherwise get a new key, and remount, with every inline token. */}
       {elements.map((element, i) =>
         isValidElement(element) ? cloneElement(element, { key: i }) : <Fragment key={i}>{element}</Fragment>
       )}
+    </>
+  );
+});
+
+function MarkdownInner({ value, live = false }: { value: string; live?: boolean }) {
+  const [split, setSplit] = useState<Split>(() => ({ text: value, blocks: splitBlocks(value, null) }));
+  let blocks = split.blocks;
+  if (split.text !== value) {
+    blocks = splitBlocks(value, split);
+    setSplit({ text: value, blocks });
+  }
+  return (
+    <View>
+      {blocks.map((block, i) => (
+        <MarkdownBlock key={i} value={block} live={live && i === blocks.length - 1} />
+      ))}
     </View>
   );
 }

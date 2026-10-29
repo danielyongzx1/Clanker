@@ -1,5 +1,7 @@
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useShallow } from 'zustand/react/shallow';
 import { deleteAttachment } from '@/lib/attachments';
 import type { ContentPart, Role, ToolPart } from '@/lib/providers';
 import { jsonFileStorage, uid } from '@/lib/storage';
@@ -324,4 +326,26 @@ export function interruptContent(content: ContentPart[]): ContentPart[] {
 
 export function messageText(message: Pick<Message, 'content'>) {
   return message.content.map((p) => (p.type === 'text' ? p.text : '')).join('');
+}
+
+/**
+ * Every conversation, for lists of chats. It changes when a chat comes or goes or what lists show
+ * of it does (title, times, pins, project, message count), not with every token a reply streams.
+ */
+export function useChatList(): Record<string, Conversation> {
+  const signature = useChats(
+    useShallow((s) =>
+      Object.values(s.conversations).flatMap((c) => [
+        c.id,
+        c.title,
+        c.updatedAt,
+        c.pinnedAt,
+        c.archivedAt,
+        c.projectId,
+        c.messages.length,
+      ])
+    )
+  );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => useChats.getState().conversations, [signature]);
 }

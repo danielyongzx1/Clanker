@@ -17,7 +17,7 @@ import { useTheme } from '@/lib/theme';
 import { useContextUsage } from '@/lib/usage';
 import { useChatLayer } from '@/lib/useChatLayer';
 import { projectWorkspace } from '@/lib/workspace';
-import { messageText, useChats } from '@/store/chats';
+import { messageText, useChatList } from '@/store/chats';
 import { useProjects } from '@/store/projects';
 import { useSettings } from '@/store/settings';
 
@@ -42,7 +42,7 @@ export default function ProjectScreen() {
   // While this page is up, the chat about to be started is one in this project.
   useChatLayer({ currentId: null, newChatProjectId: id });
   const project = useProjects((s) => s.projects[id]);
-  const conversations = useChats((s) => s.conversations);
+  const conversations = useChatList();
   const tools = useSettings((s) => s.tools);
   const [tab, setTab] = useState<Tab>('chats');
   const [added, setAdded] = useState(0);

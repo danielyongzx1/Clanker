@@ -3,11 +3,13 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 import { useTheme } from '@/lib/theme';
-import type { Message } from '@/store/chats';
+import { useChats, type Message } from '@/store/chats';
 import { MessageBubble } from './MessageBubble';
 
+const NO_MESSAGES: Message[] = [];
+
 type Props = {
-  messages: Message[];
+  conversationId: string;
   onRegenerate: (messageId: string) => void;
   // Heights of the header and composer floating over the list, so content rests clear of them.
   // The composer's is a shared value: it follows the box's expand animation on the UI thread.
@@ -15,8 +17,9 @@ type Props = {
   bottomInset: SharedValue<number>;
 };
 
-export function MessageList({ messages, onRegenerate, topInset, bottomInset }: Props) {
+export function MessageList({ conversationId, onRegenerate, topInset, bottomInset }: Props) {
   const { colors } = useTheme();
+  const messages = useChats((s) => s.conversations[conversationId]?.messages ?? NO_MESSAGES);
   const listRef = useRef<FlatList<Message>>(null);
   const [showJump, setShowJump] = useState(false);
   // Inverted list: index 0 is the newest message and offset 0 is the bottom.
