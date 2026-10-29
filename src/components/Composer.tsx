@@ -3,7 +3,7 @@ import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type HostInstance, type TextInputInstance } from 'react-native';
-import Animated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, interpolate, useAnimatedStyle, withTiming, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AttachmentMenu, type AttachAction } from '@/components/AttachmentMenu';
 import { attachmentUri, deleteAttachment, pickFiles, pickImages } from '@/lib/attachments';
@@ -29,6 +29,12 @@ const THUMB_ROW = 78;
 // Tap target around the context meter; it only takes room in the toolbar while expanded.
 const METER = 16;
 
+/** How much taller the box stands at a given progress than it does collapsed. */
+export function composerGrowth(progress: number) {
+  'worklet';
+  return interpolate(progress, [0, 1], [0, EXPANDED.padBottom - COLLAPSED.padBottom]);
+}
+
 type Props = {
   text: string;
   onChangeText: (text: string) => void;
@@ -41,9 +47,12 @@ type Props = {
   effort?: { levels: string[]; level: string; onPress: () => void };
   /** Shown beside the effort gauge while expanded, when context usage is turned on. */
   context?: ContextUsage | null;
+  /** Expansion, 0 collapsed to 1 expanded. The composer drives it; the screen reads it so the
+   *  conversation's inset can follow the box's growth on the UI thread. */
+  progress: SharedValue<number>;
 };
 
-export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboardVisible, effort, context }: Props) {
+export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboardVisible, effort, context, progress }: Props) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [attachments, setAttachments] = useState<AttachmentPart[]>([]);
@@ -55,7 +64,6 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
   // A zero-impact overlay inside the box that we can measure (Animated.View refs are awkwardly
   // typed); its window position is the box's content top-left.
   const box = useRef<HostInstance>(null);
-  const progress = useSharedValue(0);
 
   // Popovers: the attach menu hangs off the box's top-left corner and the context breakdown off
   // its top-right, measured at open time so they track the box wherever the keyboard pushed it.
@@ -68,7 +76,7 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
   // rather than focus means tapping a toolbar button (which blurs the TextInput) keeps the box
   // big until the keyboard itself goes away.
   useEffect(() => {
-    progress.value = withTiming(keyboardVisible ? 1 : 0, TWEEN);
+    progress.set(withTiming(keyboardVisible ? 1 : 0, TWEEN));
   }, [keyboardVisible, progress]);
 
   // Dismissing the keyboard (back gesture, swipe) can leave the input focused on Android, so
@@ -82,7 +90,7 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
 
   const boxStyle = useAnimatedStyle(() => ({
     marginHorizontal: interpolate(progress.value, [0, 1], [COLLAPSED.margin, EXPANDED.margin]),
-    paddingBottom: interpolate(progress.value, [0, 1], [COLLAPSED.padBottom, EXPANDED.padBottom]),
+    paddingBottom: COLLAPSED.padBottom + composerGrowth(progress.value),
   }));
   const inputStyle = useAnimatedStyle(() => ({
     paddingLeft: interpolate(progress.value, [0, 1], [COLLAPSED.padLeft, EXPANDED.padLeft]),

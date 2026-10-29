@@ -2,14 +2,14 @@ import { router, useNavigation } from 'expo-router';
 import type { DrawerNavigationProp } from 'expo-router/drawer';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Keyboard, Pressable, StyleSheet, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useDerivedValue, useSharedValue, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardAvoidingView, OverKeyboardView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useShallow } from 'zustand/react/shallow';
 import { ChatHeader } from '@/components/ChatHeader';
-import { Composer } from '@/components/Composer';
+import { Composer, composerGrowth } from '@/components/Composer';
 import { EdgeFade } from '@/components/EdgeFade';
 import { EffortSlider } from '@/components/EffortSlider';
 import { EmptyState } from '@/components/EmptyState';
@@ -64,11 +64,17 @@ export default function ChatScreen() {
   const [draft, setDraft] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   // The conversation runs under the floating header and composer; these are their measured
-  // heights (fade included) so content can rest clear of them.
+  // heights (fade included) so content can rest clear of them. The composer's is measured
+  // collapsed, and its growth while expanding is added on the UI thread: measuring it every
+  // frame re-rendered the whole screen per frame and tanked the animation.
   const [headerHeight, setHeaderHeight] = useState(insets.top + 60 + HEADER_FADE);
-  const [composerHeight, setComposerHeight] = useState(0);
+  const [composerBase, setComposerBase] = useState(0);
+  const composerProgress = useSharedValue(0);
   const topInset = headerHeight - HEADER_FADE;
-  const bottomInset = Math.max(composerHeight - COMPOSER_FADE, 0);
+  const bottomInset = useDerivedValue(() =>
+    Math.max(composerBase + composerGrowth(composerProgress.value) - COMPOSER_FADE, 0)
+  );
+  const emptyInsetStyle = useAnimatedStyle(() => ({ paddingBottom: bottomInset.value }));
   const effortOpen = useUI((s) => s.effortOpen);
   const setEffortOpen = useUI((s) => s.setEffortOpen);
   const showEffort = effortOpen && !!effort;
@@ -169,19 +175,24 @@ export default function ChatScreen() {
               bottomInset={bottomInset}
             />
           ) : (
-            <View style={[styles.container, { paddingTop: topInset, paddingBottom: bottomInset }]}>
+            <Animated.View style={[styles.container, { paddingTop: topInset }, emptyInsetStyle]}>
               <EmptyState
                 hasEndpoint={hasEndpoint}
                 onSuggestion={setDraft}
                 onAddEndpoint={() => router.push('/settings/endpoint')}
               />
-            </View>
+            </Animated.View>
           )}
           {/* Floats over the bottom of the list; content scrolling under it fades out into the
               background instead of being cut off at a hard edge. */}
           <View
             pointerEvents="box-none"
-            onLayout={(e) => setComposerHeight(e.nativeEvent.layout.height)}
+            onLayout={(e) => {
+              // Mid-animation sizes race the UI thread; the layout after it settles is exact.
+              const p = composerProgress.get();
+              if (p > 0 && p < 1) return;
+              setComposerBase(Math.round(e.nativeEvent.layout.height - composerGrowth(p)));
+            }}
             style={[styles.composerArea, { paddingBottom: bottomPad }]}
           >
             <EdgeFade solid="bottom" style={StyleSheet.absoluteFill} />
@@ -197,6 +208,7 @@ export default function ChatScreen() {
                 keyboardVisible={keyboardVisible}
                 effort={effort ? { ...effort, onPress: () => setEffortOpen(true) } : undefined}
                 context={usage}
+                progress={composerProgress}
               />
             </Animated.View>
           </View>
