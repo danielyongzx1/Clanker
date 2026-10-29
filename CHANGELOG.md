@@ -1,3 +1,12 @@
+# Clanker 1.1.2
+
+## Updates, your way
+- New **Include pre-releases** toggle in Settings → Updates: Clanker can offer beta builds, not just stable releases. Versions are now compared in proper semver order, so `1.2.0-beta.1` < `1.2.0-beta.2` < `1.2.0`
+- New **Check on launch** toggle: turn off the once-a-day update probe if you'd rather only check by hand
+- Flipping the pre-release toggle re-checks right away, so you're not waiting out the day for what it changes
+
+---
+
 # Clanker 1.1.1
 
 ## Fixes
