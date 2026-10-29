@@ -1,0 +1,7 @@
+{
+  "name": "clanker-scroll",
+  "version": "1.0.0",
+  "description": "Hands scrolls from boxes inside Clanker's inverted chat list on to the list the right way up (Android only).",
+  "main": "index.ts",
+  "private": true
+}

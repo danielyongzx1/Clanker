@@ -3,17 +3,8 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { memo, useMemo, useRef, useState, type ReactNode } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  type ScrollViewInstance,
-} from 'react-native';
+import { memo, useMemo, useState, type ReactNode } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { attachmentUri } from '@/lib/attachments';
 import type { ContentPart, FilePart, ImagePart, ToolPart } from '@/lib/providers';
 import { sitesOf, sourcesOf } from '@/lib/sources';
@@ -22,6 +13,7 @@ import { useTheme } from '@/lib/theme';
 import { messageText, type Message } from '@/store/chats';
 import { useSettings } from '@/store/settings';
 import { Markdown } from './Markdown';
+import { NestedScroll } from './NestedScroll';
 import { SiteChips, SourcesButton } from './Sources';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolCall } from './ToolCall';
@@ -170,13 +162,6 @@ function Thoughts({ text, ms, live }: { text: string; ms?: number; live: boolean
   // Expanded while it streams; a tap pins the choice either way.
   const [openOverride, setOpenOverride] = useState<boolean | null>(null);
   const open = openOverride ?? live;
-  // The box is capped in height, so while thoughts stream it follows their end, until the user
-  // drags it to read back; dragging back down to the end picks the following up again.
-  const scroll = useRef<ScrollViewInstance>(null);
-  const follow = useRef(true);
-  const settle = ({ nativeEvent: e }: NativeSyntheticEvent<NativeScrollEvent>) => {
-    follow.current = e.contentOffset.y + e.layoutMeasurement.height >= e.contentSize.height - 24;
-  };
   return (
     <>
       <ThinkingIndicator
@@ -187,21 +172,14 @@ function Thoughts({ text, ms, live }: { text: string; ms?: number; live: boolean
         onToggle={() => setOpenOverride(!open)}
       />
       {open && (
-        <ScrollView
-          ref={scroll}
-          style={styles.thoughts}
-          nestedScrollEnabled
-          onContentSizeChange={() => live && follow.current && scroll.current?.scrollToEnd({ animated: false })}
-          onScrollBeginDrag={() => (follow.current = false)}
-          onScrollEndDrag={settle}
-          onMomentumScrollEnd={settle}
-        >
+        // Capped in height, so while thoughts stream it follows their end until the user drags back to read.
+        <NestedScroll style={styles.thoughts} follow={live}>
           <View style={[styles.thoughtsInner, { borderLeftColor: colors.border }]}>
             <Text selectable style={[styles.thoughtsText, { color: colors.textSecondary }]}>
               {text}
             </Text>
           </View>
-        </ScrollView>
+        </NestedScroll>
       )}
     </>
   );

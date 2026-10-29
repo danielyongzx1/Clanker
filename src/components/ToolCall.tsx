@@ -1,7 +1,7 @@
 import Feather from '@expo/vector-icons/Feather';
 import { Image } from 'expo-image';
 import { memo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { attachmentUri } from '@/lib/attachments';
 import { openWorkspaceFile, shareWorkspaceFile } from '@/lib/openFile';
 import type { ToolPart } from '@/lib/providers';
@@ -10,6 +10,7 @@ import { describeCall, lineChanges } from '@/lib/tools';
 import type { Workspace } from '@/lib/workspace';
 import { useWorkspace } from '@/lib/useWorkspace';
 import { CodeBlock } from './CodeBlock';
+import { NestedScroll } from './NestedScroll';
 
 const ICONS: Record<string, keyof typeof Feather.glyphMap> = {
   read_file: 'file-text',
@@ -189,11 +190,11 @@ function ToolCallInner({ part }: { part: ToolPart }) {
             <CallInput part={part} />
           )}
           {output != null && (
-            <ScrollView style={[styles.output, { backgroundColor: colors.codeBg }]} nestedScrollEnabled>
+            <NestedScroll style={[styles.output, { backgroundColor: colors.codeBg }]} contentContainerStyle={styles.outputContent}>
               <Text selectable style={[styles.mono, { color: failed ? colors.danger : colors.text }]}>
                 {output.length > 20_000 ? output.slice(0, 20_000) + '\n…' : output || '(no output)'}
               </Text>
-            </ScrollView>
+            </NestedScroll>
           )}
         </View>
       )}
@@ -224,7 +225,9 @@ const styles = StyleSheet.create({
   meta: { fontSize: 12 },
   spinner: { transform: [{ scale: 0.7 }], marginVertical: -4 },
   details: { borderLeftWidth: 3, paddingLeft: 12, marginLeft: 5, marginBottom: 6, gap: 6 },
-  output: { maxHeight: 260, borderRadius: 8, padding: 10 },
+  // The padding goes on the content: on the scroll view itself Android leaves it out of the scroll range and cuts off the end.
+  output: { maxHeight: 260, borderRadius: 8 },
+  outputContent: { padding: 10 },
   mono: { fontFamily: fonts.mono, fontSize: 12.5, lineHeight: 18 },
   summary: { fontSize: 14, lineHeight: 20 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4, marginBottom: 4 },
