@@ -40,6 +40,10 @@ interface SettingsState {
   web: boolean;
   search: SearchConfig;
   compression: CompressionConfig;
+  /** Whether chats use and save memories about the user. */
+  memory: boolean;
+  /** Whether a short request after each reply saves anything worth remembering from it. */
+  memoryAuto: boolean;
   upsertEndpoint: (endpoint: Endpoint) => void;
   removeEndpoint: (id: string) => void;
   setActive: (ref: ModelRef) => void;
@@ -51,6 +55,8 @@ interface SettingsState {
   setWeb: (on: boolean) => void;
   setSearch: (search: SearchConfig) => void;
   setCompression: (compression: CompressionConfig) => void;
+  setMemory: (on: boolean) => void;
+  setMemoryAuto: (on: boolean) => void;
 }
 
 export const useSettings = create<SettingsState>()(
@@ -66,6 +72,8 @@ export const useSettings = create<SettingsState>()(
       web: true,
       search: { provider: 'firecrawl' },
       compression: COMPRESSION_DEFAULTS,
+      memory: true,
+      memoryAuto: true,
       upsertEndpoint: (endpoint) => {
         const exists = get().endpoints.some((e) => e.id === endpoint.id);
         const endpoints = exists
@@ -100,6 +108,8 @@ export const useSettings = create<SettingsState>()(
       setWeb: (web) => set({ web }),
       setSearch: (search) => set({ search }),
       setCompression: (compression) => set({ compression }),
+      setMemory: (memory) => set({ memory }),
+      setMemoryAuto: (memoryAuto) => set({ memoryAuto }),
     }),
     {
       name: 'settings',

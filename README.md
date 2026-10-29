@@ -27,12 +27,16 @@ With **Settings → File & code tools** on (the default), models get tools that 
 | `run_shell` | Android only: `/system/bin/sh` in the workspace (the phone's built-in utilities) |
 | `job_output`, `job_kill` | Collect or stop background jobs (`background: true` on the three run tools) |
 | `compress`, `decompress`, `search_context`, `context_status` | Let the model manage its own context window (below) |
+| `memory_save`, `memory_update`, `memory_forget` | Remember facts about the user across chats (below) |
+| `search_chats`, `read_chat` | Find and read the user's earlier chats |
 
 `write_file` and `edit_file` refuse a file the model hasn't read in this chat, or one that changed since it did, so it can't overwrite something it hasn't seen.
 
 Background jobs run in their own worker (or shell process) while the model keeps working; their status is listed in the system prompt on every step, and the tool row in the chat updates when they finish. They don't survive an app restart.
 
 **Context.** Each user message and each step of a reply is tagged `[mN · ~size tokens]`. The model replaces ranges it is done with by its own summaries (`compress`). It can restore them (`decompress`, one level or fully) and search the full originals (`search_context`). The originals stay in the chat; only what is sent changes. The budget is set per model on the endpoint screen (tap a model's context budget and enter something like `128K`, `1M` or `32000`). Left on auto, it is 75% of the model's context window where the API reports it (OpenRouter, Groq, LM Studio, Gemini, Anthropic), 96K on other large-context hosted APIs, and otherwise 32K. Past 90% of it the app compresses the oldest history mechanically, and if a request still overflows it compresses harder and retries. The code is in [src/lib/context.ts](src/lib/context.ts).
+
+**Memory.** Short facts about the user (at most 500 characters each, 12,000 in all) live in **Settings → Memory**, where they can be added, edited and deleted. Each chat freezes the memories it starts with into its system prompt, so prompts keep caching; later changes reach it through the `<context>` note. Models save memories with the memory tools, and after each reply a short extra request picks up anything worth remembering (this works without tool calling and can be turned off). With **Files & code** off, chats still see their memories but can't change them. The eye button on a new chat starts a temporary chat that neither uses nor saves memories, and that `search_chats` skips. The code is in [src/lib/memory.ts](src/lib/memory.ts) and [src/store/memory.ts](src/store/memory.ts).
 
 For formats with no built-in reader, the model is told to write a script that handles the file. Attached files are copied into the workspace. Files the agent writes show up as chips under its reply (tap to open, long-press to share), and in **Settings → Workspace files**.
 

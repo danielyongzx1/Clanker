@@ -66,6 +66,7 @@ export default function RootLayout() {
               <Stack.Screen name="settings/tools" options={{ title: 'Files & code' }} />
               <Stack.Screen name="settings/context" options={{ title: 'Auto-compression' }} />
               <Stack.Screen name="settings/search" options={{ title: 'Web access' }} />
+              <Stack.Screen name="settings/memory" options={{ title: 'Memory' }} />
             </Stack>
             {runtimeOn && <ScriptRuntime />}
           </ThemeProvider>

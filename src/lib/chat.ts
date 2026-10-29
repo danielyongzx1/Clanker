@@ -1,12 +1,14 @@
 import { interruptTool, messageText, useChats } from '@/store/chats';
 import { resolveBudget, resolveEffort, useSettings } from '@/store/settings';
+import { useUI } from '@/store/ui';
 import { readAttachmentBase64, saveToWorkspace } from './attachments';
 import { autoCompress, buildWire, historyOf, historyTokens, unitsOf } from './context';
+import { ensureMemoryBase, extractMemories, memoryOn } from './memory';
 import { getAdapter, ProviderError, type AttachmentPart, type Endpoint, type ToolPart } from './providers';
 import { apiKeys, uid } from './storage';
 import { availableTools, executeTool } from './tools';
 import { markObserved } from './tools/observe';
-import { agentSystemPrompt, writeContextNote } from './tools/prompt';
+import { systemPrompt, writeContextNote } from './tools/prompt';
 
 const controllers = new Map<string, AbortController>();
 
@@ -35,7 +37,8 @@ export function sendMessage(conversationId: string | null, text: string, attachm
   const { active, tools } = useSettings.getState();
   if (!active) throw new Error('Add an endpoint in Settings to start chatting.');
   const chats = useChats.getState();
-  const id = conversationId ?? chats.create(active.endpointId, active.model);
+  const memoryOff = !conversationId && useUI.getState().newChatMemoryOff;
+  const id = conversationId ?? chats.create(active.endpointId, active.model, memoryOff ? { memory: false } : undefined);
 
   // With tools on, attachments are also copied into the workspace so the agent can work on them.
   const parts = tools
@@ -126,8 +129,11 @@ async function runCompletion(id: string) {
   };
 
   // With every tool turned off one by one, the chat runs as if tools were off altogether.
-  const offered = settings.tools ? availableTools() : [];
+  const offered = settings.tools ? availableTools(id) : [];
   const tools = offered.length ? offered : undefined;
+  // The memories this chat's system prompt shows are fixed on its first request.
+  ensureMemoryBase(id);
+  const system = systemPrompt(id, !!tools);
   const budget = resolveBudget(endpoint, conversation.model);
   const { compression } = useSettings.getState();
   const reply = () => useChats.getState().conversations[id]?.messages.find((m) => m.id === replyId);
@@ -170,7 +176,7 @@ async function runCompletion(id: string) {
             apiKey,
             model: conversation.model,
             effort: effort?.level,
-            system: tools ? agentSystemPrompt() : undefined,
+            system,
             tools,
             messages: await buildMessages(),
             signal: controller.signal,
@@ -262,6 +268,11 @@ async function runCompletion(id: string) {
 
   const latest = useChats.getState().conversations[id];
   if (latest && !latest.titled) void generateTitle(id, endpoint, apiKey, conversation.model);
+  // A reply where the model managed memory itself needs no second pass, nor does a stopped one.
+  const managed = reply()?.content.some((p) => p.type === 'tool' && p.name.startsWith('memory_'));
+  if (latest && !controller.signal.aborted && !managed && memoryOn(id) && useSettings.getState().memoryAuto) {
+    void extractMemories(id, replyId, endpoint, apiKey, conversation.model);
+  }
 }
 
 async function generateTitle(id: string, endpoint: Endpoint, apiKey: string | undefined, model: string) {

@@ -60,6 +60,9 @@ export default function ChatScreen() {
   const effort = useSettings(useShallow((s) => resolveEffort(s, s.active)));
   const showUsage = useSettings((s) => s.contextUsage);
   const usage = useContextUsage(currentId, showUsage);
+  const memorySetting = useSettings((s) => s.memory);
+  const newChatMemoryOff = useUI((s) => s.newChatMemoryOff);
+  const memoryOff = memorySetting && (conversation ? conversation.memory === false : newChatMemoryOff);
 
   const [draft, setDraft] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -178,6 +181,7 @@ export default function ChatScreen() {
             <Animated.View style={[styles.container, { paddingTop: topInset }, emptyInsetStyle]}>
               <EmptyState
                 hasEndpoint={hasEndpoint}
+                memoryOff={memoryOff}
                 onSuggestion={setDraft}
                 onAddEndpoint={() => router.push('/settings/endpoint')}
               />
@@ -230,6 +234,10 @@ export default function ChatScreen() {
           }}
           onTitle={() => setPickerOpen(true)}
           onNewChat={currentId ? () => open(null) : undefined}
+          memoryOff={memoryOff}
+          onToggleMemory={
+            !currentId && memorySetting ? () => useUI.getState().setNewChatMemoryOff(!newChatMemoryOff) : undefined
+          }
         />
       </View>
 

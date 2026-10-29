@@ -2,6 +2,7 @@ import Feather from '@expo/vector-icons/Feather';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
+import { router } from 'expo-router';
 import { memo, useMemo, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { attachmentUri } from '@/lib/attachments';
@@ -294,6 +295,19 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
           )}
         </View>
       )}
+      {!!message.memorySaved?.length && (
+        <Pressable
+          onPress={() => router.push('/settings/memory')}
+          hitSlop={6}
+          style={({ pressed }) => [styles.memory, pressed && { opacity: 0.5 }]}
+          accessibilityLabel={`Memory updated: ${message.memorySaved.join('; ')}`}
+        >
+          <Feather name="bookmark" size={13} color={colors.textTertiary} />
+          <Text numberOfLines={1} style={[styles.memoryText, { color: colors.textTertiary }]}>
+            Memory updated · {message.memorySaved.join('; ')}
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -324,6 +338,8 @@ const styles = StyleSheet.create({
   action: { padding: 6 },
   model: { fontSize: 12, marginLeft: 6, flexShrink: 1 },
   sources: { marginLeft: 'auto' },
+  memory: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', maxWidth: '100%', paddingVertical: 4 },
+  memoryText: { fontSize: 13, flexShrink: 1 },
   workHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, marginLeft: 2, alignSelf: 'flex-start' },
   workLabel: { fontSize: 15, fontWeight: '500' },
   error: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 10, marginTop: 4 },

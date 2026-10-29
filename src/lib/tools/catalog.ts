@@ -51,4 +51,14 @@ export const WEB_TOOLS: ToolEntry[] = [
   { names: ['web_fetch'], title: 'Read pages', detail: 'Open web pages and download files' },
 ];
 
+/** On only in chats with memory on; listed on the memory screen rather than with the local tools. */
+export const MEMORY_TOOLS: ToolEntry[] = [
+  {
+    names: ['memory_save', 'memory_update', 'memory_forget'],
+    title: 'Let models save memories',
+    detail: 'Models remember, correct and forget things as you chat',
+  },
+  { names: ['search_chats', 'read_chat'], title: 'Search past chats', detail: 'Models can look up and read your earlier chats' },
+];
+
 export const entryOn = (entry: ToolEntry, disabled: string[]) => !entry.names.some((n) => disabled.includes(n));

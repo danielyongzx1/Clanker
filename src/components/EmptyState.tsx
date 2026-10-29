@@ -14,9 +14,11 @@ type Props = {
   hasEndpoint: boolean;
   onSuggestion: (text: string) => void;
   onAddEndpoint: () => void;
+  /** The chat about to be started is a temporary one, without memory. */
+  memoryOff?: boolean;
 };
 
-export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint }: Props) {
+export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff }: Props) {
   const { colors } = useTheme();
 
   if (!hasEndpoint) {
@@ -32,6 +34,15 @@ export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint }: Props) 
 
   return (
     <View style={styles.container}>
+      {memoryOff && (
+        <View style={styles.temporary}>
+          <Feather name="eye-off" size={22} color={colors.textSecondary} />
+          <Text style={[styles.temporaryTitle, { color: colors.text }]}>Temporary chat</Text>
+          <Text style={[styles.temporaryText, { color: colors.textTertiary }]}>
+            This chat won&apos;t use or save memories, and other chats can&apos;t look it up.
+          </Text>
+        </View>
+      )}
       {SUGGESTIONS.map((s) => (
         <Pressable
           key={s.text}
@@ -56,4 +67,7 @@ const styles = StyleSheet.create({
   ctaText: { fontSize: 15, fontWeight: '600' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 18, paddingVertical: 14 },
   rowText: { fontSize: 17, flexShrink: 1 },
+  temporary: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 },
+  temporaryTitle: { fontSize: 20, fontWeight: '600' },
+  temporaryText: { fontSize: 15, lineHeight: 21, textAlign: 'center' },
 });

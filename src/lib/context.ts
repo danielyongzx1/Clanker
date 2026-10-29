@@ -368,25 +368,30 @@ function searchable(u: Unit) {
   return parts.join('\n');
 }
 
+/** Whether `text` contains the lowercased query `q`, or every word of it. */
+export function textMatches(text: string, q: string) {
+  const lower = text.toLowerCase();
+  return lower.includes(q) || q.split(/\s+/).every((w) => lower.includes(w));
+}
+
+/** A stretch of `text` around the first place the lowercased query `q` (or its first word) occurs. */
+export function textSnippet(text: string, q: string) {
+  const lower = text.toLowerCase();
+  let at = lower.indexOf(q);
+  if (at < 0) at = lower.indexOf(q.split(/\s+/)[0]);
+  return text.slice(Math.max(0, at - 80), at + 160).replace(/\s+/g, ' ').trim();
+}
+
 /** The search_context tool: finds units and summaries mentioning `query`. */
 export function searchContext(scope: ContextScope, query: unknown) {
   const q = String(query ?? '').trim().toLowerCase();
   if (!q) throw new ContextError('Pass a query.');
-  const words = q.split(/\s+/);
   const { units, blocks } = load(scope);
   const ranges = applied(units, blocks);
   const blockOf = (i: number) => ranges.find((r) => i >= r.start && i <= r.end)?.block.id;
   const hits: string[] = [];
-  const snippet = (text: string) => {
-    const lower = text.toLowerCase();
-    let at = lower.indexOf(q);
-    if (at < 0) at = lower.indexOf(words[0]);
-    return text.slice(Math.max(0, at - 80), at + 160).replace(/\s+/g, ' ').trim();
-  };
-  const matches = (text: string) => {
-    const lower = text.toLowerCase();
-    return lower.includes(q) || words.every((w) => lower.includes(w));
-  };
+  const snippet = (text: string) => textSnippet(text, q);
+  const matches = (text: string) => textMatches(text, q);
   for (const r of ranges) {
     if (matches(r.block.summary)) hits.push(`${r.block.id} summary (${rangeLabel(units, r.start, r.end)}): …${snippet(r.block.summary)}…`);
   }

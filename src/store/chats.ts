@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { deleteAttachment } from '@/lib/attachments';
 import type { ContentPart, Role, ToolPart } from '@/lib/providers';
 import { jsonFileStorage, uid } from '@/lib/storage';
+import type { Memory } from './memory';
 
 export type MessageStatus = 'streaming' | 'done' | 'error';
 
@@ -18,6 +19,8 @@ export interface Message {
   reasoning?: string;
   /** How long the legacy `reasoning` took, in ms. */
   thoughtMs?: number;
+  /** Memories the after-reply pass saved or changed from this reply. */
+  memorySaved?: string[];
 }
 
 /**
@@ -44,6 +47,8 @@ export interface ContextNote {
   text: string;
   /** The workspace listing, when the note shows it (only when it changed since the last one). */
   workspace?: string;
+  /** Memory changes since the chat began, when the note shows them (only when they changed). */
+  memory?: string;
 }
 
 export interface Conversation {
@@ -65,11 +70,18 @@ export interface Conversation {
   observed?: Record<string, string>;
   /** Context notes by history unit key (see lib/context). */
   notes?: Record<string, ContextNote>;
+  /** False for a temporary chat, which neither uses nor saves memories. */
+  memory?: false;
+  /**
+   * The memories as they were at the chat's first request. They go in its system prompt, which
+   * must not change; later changes reach the model through context notes.
+   */
+  memoryBase?: Memory[];
 }
 
 interface ChatsState {
   conversations: Record<string, Conversation>;
-  create: (endpointId: string, model: string) => string;
+  create: (endpointId: string, model: string, opts?: { memory?: false }) => string;
   remove: (id: string) => void;
   rename: (id: string, title: string, titled?: boolean) => void;
   setModel: (id: string, endpointId: string, model: string) => void;
@@ -84,6 +96,7 @@ interface ChatsState {
   patchTool: (id: string, messageId: string, toolId: string, patch: Partial<ToolPart>) => void;
   setCompressions: (id: string, blocks: CompressionBlock[]) => void;
   setNote: (id: string, key: string, note: ContextNote) => void;
+  setMemoryBase: (id: string, memories: Memory[]) => void;
   /** Records file signatures as seen by the model; null forgets a path. */
   observe: (id: string, entries: Record<string, string | null>) => void;
   /** Removes the message with `messageId` and everything after it. */
@@ -119,13 +132,23 @@ export const useChats = create<ChatsState>()(
 
       return {
         conversations: {},
-        create: (endpointId, model) => {
+        create: (endpointId, model, opts) => {
           const id = uid();
           const now = Date.now();
           set((s) => ({
             conversations: {
               ...s.conversations,
-              [id]: { id, title: 'New chat', titled: false, createdAt: now, updatedAt: now, endpointId, model, messages: [] },
+              [id]: {
+                id,
+                title: 'New chat',
+                titled: false,
+                createdAt: now,
+                updatedAt: now,
+                endpointId,
+                model,
+                messages: [],
+                ...(opts?.memory === false ? { memory: false as const } : {}),
+              },
             },
           }));
           return id;
@@ -178,6 +201,7 @@ export const useChats = create<ChatsState>()(
           })),
         setCompressions: (id, compressions) => patchConversation(id, () => ({ compressions })),
         setNote: (id, key, note) => patchConversation(id, (c) => ({ notes: { ...c.notes, [key]: note } })),
+        setMemoryBase: (id, memoryBase) => patchConversation(id, () => ({ memoryBase })),
         observe: (id, entries) =>
           patchConversation(id, (c) => {
             const observed = { ...c.observed };

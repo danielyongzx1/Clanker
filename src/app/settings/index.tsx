@@ -8,6 +8,7 @@ import { shellAvailable } from '@/lib/tools';
 import { entryOn, LOCAL_TOOL_GROUPS, WEB_TOOLS } from '@/lib/tools/catalog';
 import { useTheme } from '@/lib/theme';
 import { SEARCH_PROVIDERS } from '@/lib/tools/web';
+import { useMemory } from '@/store/memory';
 import { useSettings, type ThemePreference } from '@/store/settings';
 
 const THEMES: { value: ThemePreference; label: string; icon: 'smartphone' | 'sun' | 'moon' }[] = [
@@ -43,6 +44,9 @@ export default function SettingsScreen() {
   const contextUsage = useSettings((s) => s.contextUsage);
   const setContextUsage = useSettings((s) => s.setContextUsage);
   const compression = useSettings((s) => s.compression);
+  const memory = useSettings((s) => s.memory);
+  const setMemory = useSettings((s) => s.setMemory);
+  const memoryCount = useMemory((s) => s.memories.length);
 
   const { on, total } = countOn(disabledTools);
 
@@ -87,6 +91,14 @@ export default function SettingsScreen() {
       </Section>
 
       <Section title="Chats">
+        <ToggleRow
+          icon="bookmark"
+          title="Memory"
+          detail={memoryCount ? `${memoryCount} saved memor${memoryCount === 1 ? 'y' : 'ies'}` : 'Remember things about you across chats'}
+          value={memory}
+          onValueChange={setMemory}
+          onPress={() => router.push('/settings/memory')}
+        />
         <ToggleRow
           icon="bar-chart-2"
           title="Context meter"

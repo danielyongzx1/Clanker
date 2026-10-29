@@ -1,10 +1,12 @@
 import { Directory, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
+import { useMemory } from '@/store/memory';
 import { useSettings } from '@/store/settings';
 import { ClankerShell } from '../../../modules/clanker-shell';
 import { importAsset } from '../attachments';
 import { compress, contextStatus, decompress, searchContext } from '../context';
 import { describeJob, getJob, jobsOf, killJob, startJob, waitForJob } from '../jobs';
+import { memoryOn, readChat, searchChats } from '../memory';
 import type { ImagePart, Source, ToolCall, ToolSpec } from '../providers';
 import { releaseWorker, runScript, type ScriptResult } from '../runtime';
 import { uid } from '../storage';
@@ -849,7 +851,87 @@ const contextStatusTool: Tool = {
   },
 };
 
+// ---- memory -------------------------------------------------------------------------------
+
+const memoryById = (id: unknown) => {
+  const memory = useMemory.getState().memories.find((m) => m.id === id);
+  if (!memory) throw new ToolError(`No memory "${id}". Saved memories and their ids are in the system prompt and the context note.`);
+  return memory;
+};
+
+const memorySave: Tool = {
+  name: 'memory_save',
+  description:
+    'Save a fact about the user to memory, so future chats know it. One short, self-contained fact per call, in the third person (e.g. "Works as a nurse on night shifts"). Returns its id.',
+  parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+  async run(input, { conversationId }) {
+    const id = useMemory.getState().add(str(input.text, 'text'), 'model', conversationId);
+    return { output: `Saved as memory ${id}.` };
+  },
+};
+
+const memoryUpdate: Tool = {
+  name: 'memory_update',
+  description: 'Replace the text of a saved memory, e.g. when the user corrects it or to merge related memories.',
+  parameters: {
+    type: 'object',
+    properties: { id: { type: 'string' }, text: { type: 'string', description: 'The new text.' } },
+    required: ['id', 'text'],
+  },
+  async run(input) {
+    const memory = memoryById(input.id);
+    useMemory.getState().update(memory.id, str(input.text, 'text'));
+    return { output: `Updated memory ${memory.id}.` };
+  },
+};
+
+const memoryForget: Tool = {
+  name: 'memory_forget',
+  description: 'Delete a saved memory that is wrong, out of date, or that the user wants forgotten.',
+  parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  async run(input) {
+    const memory = memoryById(input.id);
+    useMemory.getState().remove(memory.id);
+    return { output: `Forgot memory ${memory.id} ("${memory.text}").` };
+  },
+};
+
+const searchChatsTool: Tool = {
+  name: 'search_chats',
+  description:
+    "Search the user's other chats in this app for words or a phrase. Returns matching chats (title, chat_id, date) with snippets; open one with read_chat.",
+  parameters: {
+    type: 'object',
+    properties: {
+      query: { type: 'string' },
+      limit: { type: 'integer', description: 'How many chats, 1-20. Default 8.' },
+    },
+    required: ['query'],
+  },
+  async run(input, { conversationId }) {
+    const limit = Math.min(20, Math.max(1, Number(input.limit) || 8));
+    return { output: searchChats(str(input.query, 'query'), conversationId, limit) };
+  },
+};
+
+const readChatTool: Tool = {
+  name: 'read_chat',
+  description: 'Read the transcript of another chat by its chat_id (from search_chats). Long chats come in parts; pass offset to read on.',
+  parameters: {
+    type: 'object',
+    properties: {
+      chat_id: { type: 'string' },
+      offset: { type: 'integer', description: 'Character offset to read from. Default 0.' },
+    },
+    required: ['chat_id'],
+  },
+  async run(input) {
+    return { output: clip(readChat(str(input.chat_id, 'chat_id'), Math.max(0, Number(input.offset) || 0))) };
+  },
+};
+
 const BACKGROUND_TOOLS = [runPython.name, runJavaScript.name, runShell.name];
+const MEMORY_TOOLS: Tool[] = [memorySave, memoryUpdate, memoryForget, searchChatsTool, readChatTool];
 
 const TOOLS: Tool[] = [
   listFiles,
@@ -870,21 +952,28 @@ const TOOLS: Tool[] = [
   decompressTool,
   searchContextTool,
   contextStatusTool,
+  ...MEMORY_TOOLS,
 ];
 
 export const shellAvailable = () => Platform.OS === 'android' && !!ClankerShell;
 
 export const webEnabled = () => useSettings.getState().web;
 
-function enabled(tool: Tool) {
+/** `conversationId` is the chat the tool is for; null is the chat about to be started. */
+function enabled(tool: Tool, conversationId?: string | null) {
   if (useSettings.getState().disabledTools.includes(tool.name)) return false;
   if (tool === runShell) return shellAvailable();
   if (tool === webSearch || tool === webFetch) return webEnabled();
+  if (MEMORY_TOOLS.includes(tool)) return conversationId !== undefined && memoryOn(conversationId);
   return true;
 }
 
-/** Whether the model is offered the named tool. */
-export const toolOn = (name: string) => TOOLS.some((t) => t.name === name && enabled(t));
+/**
+ * Whether the model is offered the named tool. The memory tools also depend on the chat, so they
+ * count as on only when given its id.
+ */
+export const toolOn = (name: string, conversationId?: string | null) =>
+  TOOLS.some((t) => t.name === name && enabled(t, conversationId));
 
 // Without the job tools a background job's result could never be collected, so the run tools
 // lose their background option.
@@ -895,10 +984,10 @@ function withoutBackground(parameters: Tool['parameters']) {
   return { ...parameters, properties };
 }
 
-/** Tools offered to the model on this device. */
-export function availableTools(): ToolSpec[] {
+/** Tools offered to the model on this device, in the given chat (null: the chat about to be started). */
+export function availableTools(conversationId: string | null): ToolSpec[] {
   const jobs = jobsOn();
-  return TOOLS.filter(enabled).map(({ name, description, parameters }) => ({
+  return TOOLS.filter((t) => enabled(t, conversationId)).map(({ name, description, parameters }) => ({
     name,
     description,
     parameters: jobs || !BACKGROUND_TOOLS.includes(name) ? parameters : withoutBackground(parameters),
@@ -907,7 +996,7 @@ export function availableTools(): ToolSpec[] {
 
 export async function executeTool(call: ToolCall, ctx: Omit<ToolContext, 'callId'>): Promise<ToolOutcome> {
   const tool = TOOLS.find((t) => t.name === call.name);
-  if (!tool || !enabled(tool)) {
+  if (!tool || !enabled(tool, ctx.conversationId)) {
     return { output: `Unknown tool "${call.name}".`, isError: true };
   }
   if ('_raw' in call.input) {

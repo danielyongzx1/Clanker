@@ -3,6 +3,7 @@ import { useChats } from '@/store/chats';
 import { useSettings } from '@/store/settings';
 import { formatTokens, historyOf, historyTokens, unitsOf } from '../context';
 import { describeJob, jobsOf } from '../jobs';
+import { memoriesFor, memoryDiff, memoryOn, memorySection } from '../memory';
 import { formatSize, walk } from '../workspace';
 import { toolOn } from './index';
 
@@ -18,11 +19,13 @@ const lines = (...items: (string | false)[]) => items.filter(Boolean).join('\n')
  */
 export function agentSystemPrompt() {
   const os = Platform.OS === 'ios' ? 'iOS' : Platform.OS === 'android' ? 'Android' : Platform.OS;
-  const has = (...names: string[]) => names.some(toolOn);
+  // The chat-independent tools; the memory ones are covered by the memory section.
+  const on = (name: string) => toolOn(name);
+  const has = (...names: string[]) => names.some(on);
   const python = has('run_python');
   const javascript = has('run_javascript');
   const scripts = python || javascript;
-  const runTools = RUN_TOOLS.filter(toolOn);
+  const runTools = RUN_TOOLS.filter(on);
   const code = runTools.length > 0;
   const local = code || has(...FILE_TOOLS);
   const search = has('web_search');
@@ -120,7 +123,7 @@ export function agentSystemPrompt() {
         ? ` Use them whenever a task involves ${uses.join(', or ')}, and keep going until the task is done; don't ask the user to run things themselves.`
         : ''
     }`,
-    'After the latest message or tool result you get a <context> note with the current time and the size of the history, plus the workspace contents and background jobs when there is something new to show. Older notes stay where they were; the latest one is current.',
+    'After the latest message or tool result you get a <context> note with the current time and the size of the history, plus the workspace contents, background jobs and memory changes when there is something new to show. Older notes stay where they were; the latest one is current.',
     lines(
       '# Workspace',
       `${local ? 'All file tools take paths relative to the workspace root. ' : ''}Files the user attaches are copied into the workspace (their paths are noted in the message). Files you create there show up in the chat, where the user can open or share them, so save deliverables (reports, spreadsheets, slides, PDFs, images, code) as real files in the workspace and mention their names.`
@@ -148,6 +151,22 @@ export function agentSystemPrompt() {
 }
 
 /**
+ * The whole system prompt of a chat: the agent prompt when it has tools, and its memories when
+ * memory is on. Undefined when there is neither. Stays the same through a chat as long as the
+ * tool settings do, since the memories shown are the chat's snapshot.
+ */
+export function systemPrompt(conversationId: string | null, withTools: boolean) {
+  const memory = memoryOn(conversationId)
+    ? memorySection(memoriesFor(conversationId), {
+        writable: withTools && toolOn('memory_save', conversationId),
+        chats: withTools && toolOn('search_chats', conversationId),
+      })
+    : '';
+  const parts = [withTools ? agentSystemPrompt() : '', memory].filter(Boolean);
+  return parts.length ? parts.join('\n\n') : undefined;
+}
+
+/**
  * Writes the context note for the latest history unit, replacing any it had (a regenerated reply
  * starts over from the same user message). Called once per model response, before the request.
  */
@@ -172,6 +191,13 @@ export function writeContextNote(opts: { conversationId: string; replyId: string
     .map((u) => notes[u.key]?.workspace)
     .findLast((w) => w != null);
   const jobs = jobsOf(opts.conversationId);
+  // Memory changes since the chat's snapshot, likewise repeated only when they changed.
+  const memory = memoryOn(opts.conversationId) ? memoryDiff(conversation) : undefined;
+  const memoryShown = units
+    .slice(0, -1)
+    .map((u) => notes[u.key]?.memory)
+    .findLast((m) => m != null);
+  const memoryNew = memory != null && memory !== (memoryShown ?? '');
 
   const lines = [
     '<context>',
@@ -179,10 +205,18 @@ export function writeContextNote(opts: { conversationId: string; replyId: string
     `History: ~${formatTokens(historyTokens(opts.conversationId, opts.replyId))} of a ~${formatTokens(opts.budget)} token budget.`,
     ...(workspace !== shown ? [`Workspace contents:\n${workspace}`] : []),
     ...(jobs.length ? [`Jobs in this chat:\n${jobs.map((j) => `- ${describeJob(j)}`).join('\n')}`] : []),
+    ...(memoryNew
+      ? [
+          memory
+            ? `Memory changes since this chat began (replaces any earlier list):\n${memory}`
+            : 'Memory is back to how it was when this chat began.',
+        ]
+      : []),
     '</context>',
   ];
   useChats.getState().setNote(opts.conversationId, last.key, {
     text: lines.join('\n'),
     ...(workspace !== shown ? { workspace } : {}),
+    ...(memoryNew ? { memory } : {}),
   });
 }

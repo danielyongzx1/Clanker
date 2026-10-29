@@ -1,3 +1,5 @@
+const short = (text: string) => (text.length > 60 ? `${text.slice(0, 60).trimEnd()}…` : text);
+
 /** One-line label for a tool call, e.g. "Read report.pdf". */
 export function describeCall(name: string, input: Record<string, unknown>) {
   const p = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '');
@@ -41,6 +43,16 @@ export function describeCall(name: string, input: Record<string, unknown>) {
       return `Search history “${p('query')}”`;
     case 'context_status':
       return 'Check context';
+    case 'memory_save':
+      return `Remembered “${short(p('text'))}”`;
+    case 'memory_update':
+      return `Updated memory “${short(p('text'))}”`;
+    case 'memory_forget':
+      return 'Forgot a memory';
+    case 'search_chats':
+      return `Search chats “${p('query')}”`;
+    case 'read_chat':
+      return 'Read an earlier chat';
     default:
       return name;
   }
