@@ -41,6 +41,10 @@ interface SettingsState {
   maxSteps: number | null;
   /** Whether the composer shows a context usage meter while typing. */
   contextUsage: boolean;
+  /** Whether replies show the model's decode speed over the chat's last 10 responses. */
+  decodeSpeed: boolean;
+  /** Whether replies show how much of the prompt the server had cached over the chat's last 10 responses. */
+  cacheHits: boolean;
   /** Whether models with tools also get web search and fetch. */
   web: boolean;
   search: SearchConfig;
@@ -51,6 +55,8 @@ interface SettingsState {
   memoryAuto: boolean;
   /** Whether the chat lists show archived chats. */
   showArchived: boolean;
+  /** Whether a short request after the first reply names the chat. */
+  titleGeneration: boolean;
   followUp: FollowUpMode;
   upsertEndpoint: (endpoint: Endpoint) => void;
   removeEndpoint: (id: string) => void;
@@ -61,12 +67,15 @@ interface SettingsState {
   setToolsEnabled: (names: string[], on: boolean) => void;
   setMaxSteps: (steps: number | null) => void;
   setContextUsage: (on: boolean) => void;
+  setDecodeSpeed: (on: boolean) => void;
+  setCacheHits: (on: boolean) => void;
   setWeb: (on: boolean) => void;
   setSearch: (search: SearchConfig) => void;
   setCompression: (compression: CompressionConfig) => void;
   setMemory: (on: boolean) => void;
   setMemoryAuto: (on: boolean) => void;
   setShowArchived: (on: boolean) => void;
+  setTitleGeneration: (on: boolean) => void;
   setFollowUp: (mode: FollowUpMode) => void;
 }
 
@@ -81,12 +90,15 @@ export const useSettings = create<SettingsState>()(
       disabledTools: [],
       maxSteps: null,
       contextUsage: false,
+      decodeSpeed: false,
+      cacheHits: false,
       web: true,
       search: { provider: 'firecrawl' },
       compression: COMPRESSION_DEFAULTS,
       memory: true,
       memoryAuto: true,
       showArchived: false,
+      titleGeneration: true,
       followUp: 'queue',
       upsertEndpoint: (endpoint) => {
         const exists = get().endpoints.some((e) => e.id === endpoint.id);
@@ -120,12 +132,15 @@ export const useSettings = create<SettingsState>()(
       },
       setMaxSteps: (maxSteps) => set({ maxSteps }),
       setContextUsage: (contextUsage) => set({ contextUsage }),
+      setDecodeSpeed: (decodeSpeed) => set({ decodeSpeed }),
+      setCacheHits: (cacheHits) => set({ cacheHits }),
       setWeb: (web) => set({ web }),
       setSearch: (search) => set({ search }),
       setCompression: (compression) => set({ compression }),
       setMemory: (memory) => set({ memory }),
       setMemoryAuto: (memoryAuto) => set({ memoryAuto }),
       setShowArchived: (showArchived) => set({ showArchived }),
+      setTitleGeneration: (titleGeneration) => set({ titleGeneration }),
       setFollowUp: (followUp) => set({ followUp }),
     }),
     {

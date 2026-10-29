@@ -3,11 +3,13 @@ import { router } from 'expo-router';
 import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Row, Section, ToggleRow } from '@/components/Form';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { UpdateRow } from '@/components/Updates';
 import { PROVIDER_LABELS } from '@/lib/providers';
-import { shellAvailable } from '@/lib/tools';
+import { entryAvailable } from '@/lib/tools';
 import { entryOn, LOCAL_TOOL_GROUPS, WEB_TOOLS } from '@/lib/tools/catalog';
 import { useTheme } from '@/lib/theme';
 import { SEARCH_PROVIDERS } from '@/lib/tools/web';
+import { updatesSupported } from '@/lib/updates';
 import { useMemory } from '@/store/memory';
 import { useSettings, type FollowUpMode, type ThemePreference } from '@/store/settings';
 
@@ -24,7 +26,7 @@ const FOLLOW_UPS: { value: FollowUpMode; label: string; icon: 'list' | 'corner-d
 
 /** How many of the listed tools are on, out of those this device has. */
 function countOn(disabled: string[]) {
-  const entries = LOCAL_TOOL_GROUPS.flatMap((g) => g.tools).filter((e) => shellAvailable() || !e.names.includes('run_shell'));
+  const entries = LOCAL_TOOL_GROUPS.flatMap((g) => g.tools).filter(entryAvailable);
   return { on: entries.filter((e) => entryOn(e, disabled)).length, total: entries.length };
 }
 
@@ -48,11 +50,17 @@ export default function SettingsScreen() {
   const searchProvider = useSettings((s) => s.search.provider);
   const contextUsage = useSettings((s) => s.contextUsage);
   const setContextUsage = useSettings((s) => s.setContextUsage);
+  const decodeSpeed = useSettings((s) => s.decodeSpeed);
+  const setDecodeSpeed = useSettings((s) => s.setDecodeSpeed);
+  const cacheHits = useSettings((s) => s.cacheHits);
+  const setCacheHits = useSettings((s) => s.setCacheHits);
   const compression = useSettings((s) => s.compression);
   const memory = useSettings((s) => s.memory);
   const setMemory = useSettings((s) => s.setMemory);
   const showArchived = useSettings((s) => s.showArchived);
   const setShowArchived = useSettings((s) => s.setShowArchived);
+  const titleGeneration = useSettings((s) => s.titleGeneration);
+  const setTitleGeneration = useSettings((s) => s.setTitleGeneration);
   const followUp = useSettings((s) => s.followUp);
   const setFollowUp = useSettings((s) => s.setFollowUp);
   const memoryCount = useMemory((s) => s.memories.filter((m) => !m.projectId).length);
@@ -109,6 +117,13 @@ export default function SettingsScreen() {
           onPress={() => router.push('/settings/memory')}
         />
         <ToggleRow
+          icon="type"
+          title="Generate titles"
+          detail="Ask the model to name each chat after its first reply"
+          value={titleGeneration}
+          onValueChange={setTitleGeneration}
+        />
+        <ToggleRow
           icon="archive"
           title="Show archived chats"
           detail="List archived chats in the sidebar and in projects"
@@ -121,6 +136,20 @@ export default function SettingsScreen() {
           detail="Show how much of the model's context a chat uses while you type"
           value={contextUsage}
           onValueChange={setContextUsage}
+        />
+        <ToggleRow
+          icon="zap"
+          title="Decode speed"
+          detail="Show tokens per second under replies, averaged over the last 10 steps"
+          value={decodeSpeed}
+          onValueChange={setDecodeSpeed}
+        />
+        <ToggleRow
+          icon="database"
+          title="Cache hits"
+          detail="Show how much of the prompt the server had cached over the last 10 steps"
+          value={cacheHits}
+          onValueChange={setCacheHits}
         />
         <Row
           icon="minimize-2"
@@ -148,6 +177,12 @@ export default function SettingsScreen() {
           <SegmentedControl options={THEMES} value={theme} onChange={setTheme} />
         </View>
       </Section>
+
+      {updatesSupported && (
+        <Section title="Updates" footer="New versions come from the app's GitHub releases.">
+          <UpdateRow />
+        </Section>
+      )}
 
       <Text style={[styles.version, { color: colors.textTertiary }]}>Clanker {Constants.expoConfig?.version ?? ''}</Text>
     </ScrollView>

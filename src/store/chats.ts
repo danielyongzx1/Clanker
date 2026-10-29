@@ -24,7 +24,19 @@ export interface Message {
   thoughtMs?: number;
   /** Memories the after-reply pass saved or changed from this reply. */
   memorySaved?: string[];
+  /** Numbers from each model response that made up this reply (see lib/stats). */
+  steps?: StepStats[];
+  /** Decode speed and cache hits over the chat's last few responses, as of this reply's last one. */
+  stats?: ReplyStats;
 }
+
+/**
+ * One model response: `tokens` generated over `ms` (0 when too quick to time), and the prompt
+ * tokens it sent and had cached, where the server said.
+ */
+export type StepStats = { tokens: number; ms: number; input?: number; cached?: number };
+
+export type ReplyStats = { tokensPerSec?: number; cacheHit?: number };
 
 /**
  * A range of the history the model replaced with its own summary, to save context. `start` and

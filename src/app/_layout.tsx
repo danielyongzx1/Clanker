@@ -8,6 +8,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { DialogHost } from '@/components/Dialogs';
 import { ScriptRuntime } from '@/components/ScriptRuntime';
+import { UpdateCheck } from '@/components/Updates';
 import { useTheme } from '@/lib/theme';
 import { useSettings } from '@/store/settings';
 
@@ -78,6 +79,7 @@ export default function RootLayout() {
               <Stack.Screen name="projects/instructions" options={{ title: 'Instructions' }} />
             </Stack>
             <DialogHost />
+            <UpdateCheck />
             {runtimeOn && <ScriptRuntime />}
           </ThemeProvider>
         </SafeAreaProvider>

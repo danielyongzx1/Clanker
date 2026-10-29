@@ -1,7 +1,7 @@
 import { guessEfforts } from './effort';
 import { getJson, joinUrl, readSSE, request } from './http';
 import { uid } from '../storage';
-import type { EffortParam, Endpoint, ProviderAdapter, ToolCall, WireMessage } from './types';
+import type { EffortParam, Endpoint, ProviderAdapter, StreamUsage, ToolCall, WireMessage } from './types';
 
 function headers(endpoint: Endpoint, apiKey?: string) {
   return { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}), ...endpoint.headers };
@@ -116,6 +116,8 @@ export const openai: ProviderAdapter = {
     const body = {
       model,
       stream: true,
+      // Token counts come in a last chunk, only when asked for.
+      stream_options: { include_usage: true },
       ...(effort ? effortBody(endpoint, effort) : {}),
       ...(tools?.length
         ? {
@@ -134,10 +136,12 @@ export const openai: ProviderAdapter = {
     });
     // Tool calls stream in fragments keyed by index: the id and name first, then the arguments.
     const calls: { id?: string; name: string; args: string }[] = [];
+    let usage: StreamUsage | undefined;
     for await (const data of readSSE(res)) {
       if (data === '[DONE]') break;
       const json = JSON.parse(data);
       if (json.error) throw new Error(json.error.message ?? String(json.error));
+      if (json.usage || json.timings) usage = usageOf(json);
       const delta = json.choices?.[0]?.delta;
       // Reasoning arrives as `reasoning_content` on DeepSeek/llama.cpp-style servers and as
       // `reasoning` on OpenRouter.
@@ -169,9 +173,31 @@ export const openai: ProviderAdapter = {
         }
         return { id: c.id ?? `call_${uid()}`, name: c.name, input };
       });
-    return { toolCalls };
+    return { toolCalls, usage };
   },
 };
+
+/**
+ * llama.cpp's `timings` count what it decoded and how long that took, and `cache_n` the prompt
+ * tokens it reused; elsewhere `usage` has the counts, with cached tokens under OpenAI's
+ * `prompt_tokens_details` or DeepSeek's `prompt_cache_hit_tokens`.
+ */
+function usageOf(json: any): StreamUsage {
+  const t = json.timings;
+  if (t && typeof t.predicted_n === 'number') {
+    return {
+      output: t.predicted_n,
+      decodeMs: t.predicted_ms,
+      ...(typeof t.cache_n === 'number' ? { input: (t.prompt_n ?? 0) + t.cache_n, cached: t.cache_n } : {}),
+    };
+  }
+  const u = json.usage ?? {};
+  return {
+    output: u.completion_tokens,
+    input: u.prompt_tokens,
+    cached: u.prompt_tokens_details?.cached_tokens ?? u.prompt_cache_hit_tokens,
+  };
+}
 
 const imageParts = (images: WireMessage['images']) =>
   images.map((img) => ({ type: 'image_url', image_url: { url: `data:${img.mimeType};base64,${img.base64}` } }));

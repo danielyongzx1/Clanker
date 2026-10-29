@@ -1,5 +1,5 @@
 import { getJson, joinUrl, readSSE, request } from './http';
-import type { Endpoint, ProviderAdapter, ToolCall, WireMessage } from './types';
+import type { Endpoint, ProviderAdapter, StreamUsage, ToolCall, WireMessage } from './types';
 
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -113,9 +113,17 @@ export const anthropic: ProviderAdapter = {
     const blocks: Record<number, Record<string, any>> = {};
     const toolCalls: ToolCall[] = [];
     const thinking: unknown[] = [];
+    const usage: StreamUsage = {};
     for await (const data of readSSE(res)) {
       const event = JSON.parse(data);
       if (event.type === 'error') throw new Error(event.error?.message ?? 'Stream error');
+      // Prompt counts come at the start; the output count grows in message_delta to its total.
+      if (event.type === 'message_start' && event.message?.usage) {
+        const u = event.message.usage;
+        usage.cached = u.cache_read_input_tokens ?? 0;
+        usage.input = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + usage.cached;
+      }
+      if (event.type === 'message_delta' && typeof event.usage?.output_tokens === 'number') usage.output = event.usage.output_tokens;
       if (event.type === 'content_block_start') {
         const block = event.content_block;
         if (block?.type === 'tool_use') {
@@ -157,7 +165,7 @@ export const anthropic: ProviderAdapter = {
       }
       if (event.type === 'message_stop') break;
     }
-    return { toolCalls, thinking: thinking.length ? thinking : undefined };
+    return { toolCalls, thinking: thinking.length ? thinking : undefined, usage };
   },
 };
 

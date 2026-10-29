@@ -17,8 +17,10 @@ import {
 import { attachmentUri } from '@/lib/attachments';
 import type { ContentPart, FilePart, ImagePart, ToolPart } from '@/lib/providers';
 import { sitesOf, sourcesOf } from '@/lib/sources';
+import { formatStats } from '@/lib/stats';
 import { useTheme } from '@/lib/theme';
 import { messageText, type Message } from '@/store/chats';
+import { useSettings } from '@/store/settings';
 import { Markdown } from './Markdown';
 import { SiteChips, SourcesButton } from './Sources';
 import { ThinkingIndicator } from './ThinkingIndicator';
@@ -208,6 +210,9 @@ function Thoughts({ text, ms, live }: { text: string; ms?: number; live: boolean
 function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
+  const showSpeed = useSettings((s) => s.decodeSpeed);
+  const showCache = useSettings((s) => s.cacheHits);
+  const stats = formatStats(message.stats, { speed: showSpeed, cache: showCache });
   const text = messageText(message);
   const images = message.content.filter((p): p is ImagePart => p.type === 'image');
   const files = message.content.filter((p): p is FilePart => p.type === 'file');
@@ -317,6 +322,7 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
               {message.model}
             </Text>
           )}
+          {!!stats && <Text style={[styles.stats, { color: colors.textTertiary }]}>· {stats}</Text>}
           {!!sources.length && (
             <View style={styles.sources}>
               <SourcesButton sources={sources} />
@@ -366,6 +372,7 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2, marginLeft: -6 },
   action: { padding: 6 },
   model: { fontSize: 12, marginLeft: 6, flexShrink: 1 },
+  stats: { fontSize: 12, fontVariant: ['tabular-nums'] },
   sources: { marginLeft: 'auto' },
   memory: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', maxWidth: '100%', paddingVertical: 4 },
   memoryText: { fontSize: 13, flexShrink: 1 },
