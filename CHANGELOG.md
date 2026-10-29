@@ -1,3 +1,12 @@
+# Clanker 1.1.1
+
+## Fixes
+- **Phone control now works while Clanker is in the background**: Android pauses the app's timers when you switch away, which stalled the agent mid-task in another app. It now keeps a background task alive for as long as a reply is using the phone, so the Stop overlay, waits and saves run to the end
+- Phone screenshots are downsized to what the model can actually use, so looking at the screen is faster and cheaper
+- **Scrolling inside replies is fixed**: dragging through a thought or tool output no longer sends the chat flying backwards at its edges — past the end, the drag now carries on into the chat the way you'd expect
+
+---
+
 # Clanker 1.1.0
 
 ## Clanker can use your phone
