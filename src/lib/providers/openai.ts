@@ -7,20 +7,73 @@ function headers(endpoint: Endpoint, apiKey?: string) {
   return { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}), ...endpoint.headers };
 }
 
+/** The `metadata` block of a llama-swap model's config. */
+type LlamaSwapMeta = {
+  reasoning?: boolean;
+  /** Effort levels mapped to the value the template takes; empty where the model has no such level. */
+  thinkingLevelMap?: Record<string, string | null>;
+  compat?: { chatTemplateKwargs?: Record<string, unknown> };
+};
+
 type OpenAIModel = {
   id: string;
   owned_by?: string;
-  /** OpenRouter lists the request parameters each model accepts. */
+  /** OpenRouter lists the request parameters each model accepts; llama-swap lists only the tool ones. */
   supported_parameters?: string[];
-  /** llama-swap describes each model's input and output modalities. */
-  capabilities?: { in?: unknown };
+  /** llama-swap's modalities; older versions sent them, and the context window, under `capabilities`. */
+  architecture?: { input_modalities?: unknown; output_modalities?: unknown };
+  capabilities?: { in?: unknown; out?: unknown; context?: unknown };
   /** Context window: OpenRouter's `context_length`, Groq's `context_window`, LM Studio's `max_context_length`. */
   context_length?: number;
   context_window?: number;
   max_context_length?: number;
+  /** llama-swap repeats the context window as `n_ctx` and passes on its config metadata as `llamaswap`. */
+  meta?: { n_ctx?: number; llamaswap?: LlamaSwapMeta };
 };
 
 const isOpenRouter = (endpoint: Endpoint) => endpoint.baseUrl.includes('openrouter.ai');
+
+const LEVEL_ORDER = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+function contextOf(m: OpenAIModel) {
+  const legacy = m.capabilities?.context;
+  return (
+    m.context_length ??
+    m.context_window ??
+    m.max_context_length ??
+    m.meta?.n_ctx ??
+    (typeof legacy === 'number' ? legacy : undefined)
+  );
+}
+
+/** False for speech and other models that don't both take and return text. */
+function isChatModel(m: OpenAIModel) {
+  const has = (list: unknown) => !Array.isArray(list) || list.includes('text');
+  return (
+    has(m.architecture?.input_modalities ?? m.capabilities?.in) &&
+    has(m.architecture?.output_modalities ?? m.capabilities?.out)
+  );
+}
+
+function effortsOf(endpoint: Endpoint, m: OpenAIModel, effortParam: EffortParam): string[] | undefined {
+  if (!isChatModel(m)) return undefined;
+  const meta = m.meta?.llamaswap;
+  if (meta?.reasoning === false) return undefined;
+  const map = meta?.thinkingLevelMap;
+  if (map) {
+    const levels = LEVEL_ORDER.filter((l) => map[l] != null);
+    // A template that reads enable_thinking can also switch thinking off.
+    const toggles = 'enable_thinking' in (meta.compat?.chatTemplateKwargs ?? {});
+    const all = toggles ? ['off', ...levels] : levels;
+    return all.length ? all : undefined;
+  }
+  if (m.supported_parameters && m.owned_by !== 'llama-swap') {
+    return m.supported_parameters.some((p) => p === 'reasoning' || p === 'reasoning_effort')
+      ? ['low', 'medium', 'high']
+      : undefined;
+  }
+  return guessEfforts('openai', m.id, effortParam);
+}
 
 function detectEffortParam(endpoint: Endpoint, models: OpenAIModel[]): EffortParam {
   if (isOpenRouter(endpoint)) return 'reasoning';
@@ -35,10 +88,13 @@ function effortBody(endpoint: Endpoint, effort: string) {
       // `enabled` matters for models that only reason on request; effort picks the depth.
       return { reasoning: { effort, enabled: true, exclude: false } };
     case 'chat_template_kwargs':
-      // Hybrid models (Qwen3, GLM, ...) toggle thinking; gpt-oss's template reads a level.
+      // Hybrid models (Qwen3, GLM, ...) toggle thinking; gpt-oss's and Qwen3.8's templates read a level.
+      // A level also switches thinking on, for templates that read both.
       return {
         chat_template_kwargs:
-          effort === 'on' || effort === 'off' ? { enable_thinking: effort === 'on' } : { reasoning_effort: effort },
+          effort === 'on' || effort === 'off'
+            ? { enable_thinking: effort === 'on' }
+            : { enable_thinking: true, reasoning_effort: effort },
       };
     case 'reasoning_effort':
       return { reasoning_effort: effort };
@@ -51,15 +107,7 @@ export const openai: ProviderAdapter = {
     const data: OpenAIModel[] = json.data ?? [];
     const effortParam = detectEffortParam(endpoint, data);
     const models = data
-      .map((m) => ({
-        id: m.id,
-        contextLength: m.context_length ?? m.context_window ?? m.max_context_length,
-        efforts: m.supported_parameters
-          ? m.supported_parameters.some((p) => p === 'reasoning' || p === 'reasoning_effort')
-            ? ['low', 'medium', 'high']
-            : undefined
-          : guessEfforts('openai', m.id, effortParam),
-      }))
+      .map((m) => ({ id: m.id, contextLength: contextOf(m), efforts: effortsOf(endpoint, m, effortParam) }))
       .sort((a, b) => a.id.localeCompare(b.id));
     return { models, effortParam };
   },
