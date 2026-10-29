@@ -61,4 +61,4 @@ The first release of Clanker: a chat app for Android that talks to your own AI e
 - Projects group chats with a shared workspace, source files, instructions and optional project-only memory
 
 ## Install
-Download `app-release.apk` below and open it. Android will ask you to allow installs from your browser or file manager the first time.
+Download `clanker-1.1.0.apk` below and open it. Android will ask you to allow installs from your browser or file manager the first time.
