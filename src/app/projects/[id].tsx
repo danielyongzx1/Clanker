@@ -1,24 +1,25 @@
 import Feather from '@expo/vector-icons/Feather';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSharedValue } from 'react-native-reanimated';
+import { useChatMenu } from '@/components/ChatMenu';
 import { reportSendError } from '@/components/ChatScreen';
 import { ComposerDock } from '@/components/ComposerDock';
 import { FileList } from '@/components/FileList';
 import { openProjectChat, useProjectMenu } from '@/components/ProjectMenu';
-import { sendMessage, stopStreaming } from '@/lib/chat';
+import { sendMessage } from '@/lib/chat';
 import { addSources, SOURCES_DIR } from '@/lib/projects';
 import type { AttachmentPart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 import { useContextUsage } from '@/lib/usage';
 import { useChatLayer } from '@/lib/useChatLayer';
 import { projectWorkspace } from '@/lib/workspace';
-import { messageText, useChats, type Conversation } from '@/store/chats';
+import { messageText, useChats } from '@/store/chats';
 import { useProjects } from '@/store/projects';
 import { useSettings } from '@/store/settings';
-import { useUI } from '@/store/ui';
 
 type Tab = 'chats' | 'sources' | 'files';
 
@@ -46,6 +47,8 @@ export default function ProjectScreen() {
   const [tab, setTab] = useState<Tab>('chats');
   const [added, setAdded] = useState(0);
   const { show, menu } = useProjectMenu({ onProjectPage: true, onDeleted: () => router.back() });
+  const { show: showChatMenu, menu: chatMenu } = useChatMenu();
+  const showArchived = useSettings((s) => s.showArchived);
   const workspace = useMemo(() => projectWorkspace(id), [id]);
   const showUsage = useSettings((s) => s.contextUsage);
   const usage = useContextUsage(null, showUsage);
@@ -67,13 +70,13 @@ export default function ProjectScreen() {
     [id]
   );
 
-  const chats = useMemo(
-    () =>
-      Object.values(conversations)
-        .filter((c) => c.projectId === id && c.messages.length > 0)
-        .sort((a, b) => b.updatedAt - a.updatedAt),
-    [conversations, id]
-  );
+  // Pinned chats first and archived ones (when shown at all) last, the latest first within each.
+  const chats = useMemo(() => {
+    const rank = (c: { pinnedAt?: number; archivedAt?: number }) => (c.archivedAt ? 2 : c.pinnedAt ? 0 : 1);
+    return Object.values(conversations)
+      .filter((c) => c.projectId === id && c.messages.length > 0 && (showArchived || !c.archivedAt))
+      .sort((a, b) => rank(a) - rank(b) || b.updatedAt - a.updatedAt);
+  }, [conversations, id, showArchived]);
 
   if (!project) return <View style={{ flex: 1, backgroundColor: colors.background }} />;
 
@@ -86,20 +89,6 @@ export default function ProjectScreen() {
       Alert.alert('Could not add sources', e instanceof Error ? e.message : String(e));
     }
   };
-
-  const chatActions = (c: Conversation) =>
-    Alert.alert(c.title, undefined, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          stopStreaming(c.id);
-          useChats.getState().remove(c.id);
-          if (useUI.getState().currentId === c.id) useUI.getState().open(null);
-        },
-      },
-    ]);
 
   const listStyle = { paddingBottom: composerBase + LIST_GAP };
 
@@ -151,12 +140,16 @@ export default function ProjectScreen() {
                 return (
                   <Pressable
                     onPress={() => openProjectChat(id, item.id, true)}
-                    onLongPress={() => chatActions(item)}
+                    onLongPress={(e) => showChatMenu(item, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
                     style={({ pressed }) => [styles.chat, pressed && { backgroundColor: colors.surfaceHover }]}
                   >
-                    <Text numberOfLines={1} style={[styles.chatTitle, { color: colors.text }]}>
-                      {item.title}
-                    </Text>
+                    <View style={styles.chatHead}>
+                      <Text numberOfLines={1} style={[styles.chatTitle, { color: colors.text }]}>
+                        {item.title}
+                      </Text>
+                      {!!item.pinnedAt && <MaterialCommunityIcons name="pin" size={16} color={colors.textTertiary} />}
+                      {!!item.archivedAt && <Feather name="archive" size={15} color={colors.textTertiary} />}
+                    </View>
                     {!!preview && (
                       <Text numberOfLines={1} style={[styles.chatPreview, { color: colors.textSecondary }]}>
                         {preview}
@@ -229,6 +222,7 @@ export default function ProjectScreen() {
       </KeyboardAvoidingView>
 
       {menu}
+      {chatMenu}
     </View>
   );
 }
@@ -239,7 +233,8 @@ const styles = StyleSheet.create({
   tab: { paddingHorizontal: 18, paddingVertical: 9, borderRadius: 999 },
   tabText: { fontSize: 16, fontWeight: '500' },
   chat: { paddingHorizontal: 20, paddingVertical: 12, gap: 2 },
-  chatTitle: { fontSize: 17 },
+  chatHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  chatTitle: { fontSize: 17, flexShrink: 1 },
   chatPreview: { fontSize: 15 },
   empty: { alignItems: 'center', gap: 12, paddingVertical: 48, paddingHorizontal: 32 },
   emptyText: { fontSize: 15, lineHeight: 21, textAlign: 'center' },

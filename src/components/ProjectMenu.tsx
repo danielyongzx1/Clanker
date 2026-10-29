@@ -1,12 +1,12 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert } from 'react-native';
 import { stopStreaming } from '@/lib/chat';
 import { deleteProject } from '@/lib/projects';
 import { useChats } from '@/store/chats';
 import { useProjects, type Project } from '@/store/projects';
 import { ContextMenu, type MenuAnchor, type MenuItem } from './ContextMenu';
+import { confirm } from './Dialogs';
 
 /**
  * Shows a chat in a project (null: a new one) over the project's page, so its back button leads
@@ -19,22 +19,17 @@ export function openProjectChat(projectId: string, chatId: string | null, onPage
 
 export function confirmDeleteProject(project: Project, onDeleted?: () => void) {
   const count = Object.values(useChats.getState().conversations).filter((c) => c.projectId === project.id).length;
-  Alert.alert(
-    `Delete "${project.name}"?`,
-    `This deletes the project${count ? `, its ${count} chat${count === 1 ? '' : 's'}` : ''}, its sources and files, and any memories only it could see. This can't be undone.`,
-    [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          for (const c of Object.values(useChats.getState().conversations)) if (c.projectId === project.id) stopStreaming(c.id);
-          deleteProject(project.id);
-          onDeleted?.();
-        },
-      },
-    ]
-  );
+  confirm({
+    title: `Delete "${project.name}"?`,
+    message: `This deletes the project${count ? `, its ${count} chat${count === 1 ? '' : 's'}` : ''}, its sources and files, and any memories only it could see. This can't be undone.`,
+    confirmLabel: 'Delete',
+    destructive: true,
+    onConfirm: () => {
+      for (const c of Object.values(useChats.getState().conversations)) if (c.projectId === project.id) stopStreaming(c.id);
+      deleteProject(project.id);
+      onDeleted?.();
+    },
+  });
 }
 
 type MenuOptions = {

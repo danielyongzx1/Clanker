@@ -82,6 +82,10 @@ export interface Conversation {
   projectId?: string;
   /** Set on chats from before workspaces were per chat: they keep the one they all shared. */
   workspace?: 'shared';
+  /** When it was pinned to the top of the chat lists; unset when it isn't. */
+  pinnedAt?: number;
+  /** When it was archived: hidden from the chat lists unless Settings shows archived chats. */
+  archivedAt?: number;
 }
 
 interface ChatsState {
@@ -90,6 +94,15 @@ interface ChatsState {
   remove: (id: string) => void;
   rename: (id: string, title: string, titled?: boolean) => void;
   setModel: (id: string, endpointId: string, model: string) => void;
+  setPinned: (id: string, pinned: boolean) => void;
+  /** Archiving also unpins. */
+  setArchived: (id: string, archived: boolean) => void;
+  /**
+   * Puts the chat in a project (undefined: in none, with a workspace of its own). Only the record:
+   * lib/projects moveChatToProject also brings its files. What the model has seen and the
+   * memories its prompt shows start over, since its files and memory pool can change.
+   */
+  moveTo: (id: string, projectId: string | undefined) => void;
   addMessage: (id: string, message: Omit<Message, 'id' | 'createdAt'>) => string;
   updateMessage: (id: string, messageId: string, patch: Partial<Message>) => void;
   appendText: (id: string, messageId: string, text: string) => void;
@@ -177,6 +190,14 @@ export const useChats = create<ChatsState>()(
         },
         rename: (id, title, titled = true) => patchConversation(id, () => ({ title, titled })),
         setModel: (id, endpointId, model) => patchConversation(id, () => ({ endpointId, model })),
+        setPinned: (id, pinned) => patchConversation(id, () => ({ pinnedAt: pinned ? Date.now() : undefined })),
+        setArchived: (id, archived) =>
+          patchConversation(id, (c) => ({
+            archivedAt: archived ? Date.now() : undefined,
+            pinnedAt: archived ? undefined : c.pinnedAt,
+          })),
+        moveTo: (id, projectId) =>
+          patchConversation(id, () => ({ projectId, workspace: undefined, observed: undefined, memoryBase: undefined })),
         addMessage: (id, message) => {
           const messageId = uid();
           const now = Date.now();

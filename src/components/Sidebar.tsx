@@ -1,20 +1,25 @@
 import Feather from '@expo/vector-icons/Feather';
-import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import type { DrawerContentComponentProps } from 'expo-router/drawer';
 import { useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { stopStreaming } from '@/lib/chat';
 import { useTheme } from '@/lib/theme';
 import { messageText, useChats, type Conversation } from '@/store/chats';
-import { useProjects } from '@/store/projects';
+import { useProjects, type Project } from '@/store/projects';
+import { useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
+import { useChatMenu } from './ChatMenu';
 import { openProjectChat, useProjectMenu } from './ProjectMenu';
 
 const DAY = 24 * 60 * 60 * 1000;
 
-function groupByDate(conversations: Conversation[]) {
+type Item = { kind: 'project'; project: Project } | { kind: 'chat'; chat: Conversation };
+type Section = { title: string; data: Item[] };
+
+const chatItem = (chat: Conversation): Item => ({ kind: 'chat', chat });
+
+function groupByDate(conversations: Conversation[]): Section[] {
   const startOfToday = new Date().setHours(0, 0, 0, 0);
   const buckets: { title: string; after: number }[] = [
     { title: 'Today', after: startOfToday },
@@ -23,9 +28,9 @@ function groupByDate(conversations: Conversation[]) {
     { title: 'Previous 30 days', after: startOfToday - 30 * DAY },
     { title: 'Older', after: -Infinity },
   ];
-  const sections = buckets.map((b) => ({ title: b.title, data: [] as Conversation[] }));
+  const sections = buckets.map((b) => ({ title: b.title, data: [] as Item[] }));
   for (const c of conversations) {
-    sections[buckets.findIndex((b) => c.updatedAt >= b.after)].data.push(c);
+    sections[buckets.findIndex((b) => c.updatedAt >= b.after)].data.push(chatItem(c));
   }
   return sections.filter((s) => s.data.length);
 }
@@ -37,33 +42,41 @@ export function Sidebar({ navigation }: DrawerContentComponentProps) {
   const currentId = useUI((s) => s.currentId);
   const open = useUI((s) => s.open);
   const projects = useProjects((s) => s.projects);
-  const currentProjectId = useChats((s) => (currentId ? s.conversations[currentId]?.projectId : undefined));
-  const newChatProjectId = useUI((s) => s.newChatProjectId);
-  const activeProjectId = currentId ? currentProjectId : newChatProjectId;
+  const showArchived = useSettings((s) => s.showArchived);
   const { show: showProjectMenu, menu: projectMenu } = useProjectMenu({
     onNewChat: () => navigation.closeDrawer(),
     onNavigate: () => navigation.closeDrawer(),
   });
-  const pinned = useMemo(
-    () => Object.values(projects).filter((p) => p.pinnedAt).sort((a, b) => a.pinnedAt! - b.pinnedAt!),
-    [projects]
-  );
+  const { show: showChatMenu, menu: chatMenu } = useChatMenu();
   const [query, setQuery] = useState('');
-  const [renaming, setRenaming] = useState<Conversation | null>(null);
-  const [renameText, setRenameText] = useState('');
 
   const sections = useMemo(() => {
     const q = query.trim().toLowerCase();
-    // Chats in a project are listed in it, and here only when searching.
-    const list = Object.values(conversations)
-      .filter((c) => c.messages.length > 0 && (!c.projectId || q))
-      .filter(
-        (c) =>
-          !q || c.title.toLowerCase().includes(q) || c.messages.some((m) => messageText(m).toLowerCase().includes(q))
-      )
+    const matches = (c: Conversation) =>
+      !q || c.title.toLowerCase().includes(q) || c.messages.some((m) => messageText(m).toLowerCase().includes(q));
+    const chats = Object.values(conversations)
+      .filter((c) => c.messages.length > 0 && (showArchived || !c.archivedAt) && matches(c))
       .sort((a, b) => b.updatedAt - a.updatedAt);
-    return groupByDate(list);
-  }, [conversations, query]);
+
+    // Pinned projects and chats come first, in the order they were pinned, wherever the chats live.
+    const pinned: { at: number; item: Item }[] = [
+      ...Object.values(projects)
+        .filter((p) => p.pinnedAt && (!q || p.name.toLowerCase().includes(q)))
+        .map((p) => ({ at: p.pinnedAt!, item: { kind: 'project' as const, project: p } })),
+      ...chats.filter((c) => c.pinnedAt && !c.archivedAt).map((c) => ({ at: c.pinnedAt!, item: chatItem(c) })),
+    ].sort((a, b) => a.at - b.at);
+
+    // Chats in a project are listed in it, and here only when pinned or searched for.
+    const listed = (c: Conversation) => !c.pinnedAt && (!c.projectId || q);
+    return [
+      ...(pinned.length ? [{ title: 'Pinned', data: pinned.map((p) => p.item) }] : []),
+      ...groupByDate(chats.filter((c) => !c.archivedAt && listed(c))),
+      ...(showArchived
+        ? [{ title: 'Archived', data: chats.filter((c) => c.archivedAt && (!c.projectId || q)).map(chatItem) }]
+        : []
+      ).filter((s) => s.data.length),
+    ];
+  }, [conversations, projects, query, showArchived]);
 
   const select = (id: string | null) => {
     navigation.closeDrawer();
@@ -76,34 +89,6 @@ export function Sidebar({ navigation }: DrawerContentComponentProps) {
   const goTo = (href: '/projects' | { pathname: '/projects/[id]'; params: { id: string } }) => {
     navigation.closeDrawer();
     router.push(href);
-  };
-
-  const showActions = (c: Conversation) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(c.title, undefined, [
-      {
-        text: 'Rename',
-        onPress: () => {
-          setRenameText(c.title);
-          setRenaming(c);
-        },
-      },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          stopStreaming(c.id);
-          useChats.getState().remove(c.id);
-          if (currentId === c.id) open(null);
-        },
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-
-  const saveRename = () => {
-    if (renaming && renameText.trim()) useChats.getState().rename(renaming.id, renameText.trim());
-    setRenaming(null);
   };
 
   return (
@@ -126,14 +111,14 @@ export function Sidebar({ navigation }: DrawerContentComponentProps) {
 
       <Pressable
         onPress={() => select(null)}
-        style={({ pressed }) => [styles.item, styles.newChat, pressed && { backgroundColor: colors.surfaceHover }]}
+        style={({ pressed }) => [styles.item, styles.row, pressed && { backgroundColor: colors.surfaceHover }]}
       >
         <Feather name="message-circle" size={18} color={colors.text} />
         <Text style={[styles.itemText, { color: colors.text, fontWeight: '500' }]}>New chat</Text>
       </Pressable>
       <Pressable
         onPress={() => goTo('/projects')}
-        style={({ pressed }) => [styles.item, styles.newChat, pressed && { backgroundColor: colors.surfaceHover }]}
+        style={({ pressed }) => [styles.item, styles.row, pressed && { backgroundColor: colors.surfaceHover }]}
       >
         <Feather name="folder" size={18} color={colors.text} />
         <Text style={[styles.itemText, { color: colors.text, fontWeight: '500' }]}>Projects</Text>
@@ -141,55 +126,51 @@ export function Sidebar({ navigation }: DrawerContentComponentProps) {
 
       <SectionList
         sections={sections}
-        keyExtractor={(c) => c.id}
+        keyExtractor={(item) => (item.kind === 'project' ? `p:${item.project.id}` : item.chat.id)}
         stickySectionHeadersEnabled={false}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: 12 }}
-        ListHeaderComponent={
-          pinned.length ? (
-            <View>
-              {pinned.map((p) => (
-                <Pressable
-                  key={p.id}
-                  onPress={() => goTo({ pathname: '/projects/[id]', params: { id: p.id } })}
-                  onLongPress={(e) => showProjectMenu(p, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
-                  style={({ pressed }) => [
-                    styles.item,
-                    styles.newChat,
-                    (p.id === activeProjectId || pressed) && { backgroundColor: colors.surfaceHover },
-                  ]}
-                >
-                  <Feather name="folder" size={18} color={colors.textSecondary} />
-                  <Text numberOfLines={1} style={[styles.itemText, styles.project, { color: colors.text }]}>
-                    {p.name}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : undefined
-        }
         renderSectionHeader={({ section }) => (
           <Text style={[styles.section, { color: colors.textTertiary }]}>{section.title}</Text>
         )}
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => select(item.id)}
-            onLongPress={() => showActions(item)}
-            style={({ pressed }) => [
-              styles.item,
-              (item.id === currentId || pressed) && { backgroundColor: colors.surfaceHover },
-            ]}
-          >
-            <Text numberOfLines={1} style={[styles.itemText, { color: colors.text }]}>
-              {item.title}
-            </Text>
-            {item.projectId && projects[item.projectId] && (
-              <Text numberOfLines={1} style={[styles.itemProject, { color: colors.textTertiary }]}>
-                {projects[item.projectId].name}
+        renderItem={({ item }) => {
+          if (item.kind === 'project') {
+            const p = item.project;
+            return (
+              <Pressable
+                onPress={() => goTo({ pathname: '/projects/[id]', params: { id: p.id } })}
+                onLongPress={(e) => showProjectMenu(p, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
+                style={({ pressed }) => [styles.item, styles.row, pressed && { backgroundColor: colors.surfaceHover }]}
+              >
+                <Feather name="folder" size={18} color={colors.textSecondary} />
+                <Text numberOfLines={1} style={[styles.itemText, styles.grow, { color: colors.text }]}>
+                  {p.name}
+                </Text>
+              </Pressable>
+            );
+          }
+          const c = item.chat;
+          const project = c.projectId ? projects[c.projectId] : undefined;
+          return (
+            <Pressable
+              onPress={() => select(c.id)}
+              onLongPress={(e) => showChatMenu(c, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
+              style={({ pressed }) => [
+                styles.item,
+                (c.id === currentId || pressed) && { backgroundColor: colors.surfaceHover },
+              ]}
+            >
+              <Text numberOfLines={1} style={[styles.itemText, { color: colors.text }]}>
+                {c.title}
               </Text>
-            )}
-          </Pressable>
-        )}
+              {project && (
+                <Text numberOfLines={1} style={[styles.itemProject, { color: colors.textTertiary }]}>
+                  {project.name}
+                </Text>
+              )}
+            </Pressable>
+          );
+        }}
         ListEmptyComponent={
           <Text style={[styles.empty, { color: colors.textTertiary }]}>
             {query ? 'No chats found' : 'Your chats will appear here'}
@@ -215,30 +196,7 @@ export function Sidebar({ navigation }: DrawerContentComponentProps) {
       </Pressable>
 
       {projectMenu}
-
-      <Modal visible={!!renaming} transparent animationType="fade" onRequestClose={() => setRenaming(null)}>
-        <Pressable style={[styles.dialogBackdrop, { backgroundColor: colors.overlay }]} onPress={() => setRenaming(null)}>
-          <Pressable style={[styles.dialog, { backgroundColor: colors.background }]}>
-            <Text style={[styles.dialogTitle, { color: colors.text }]}>Rename chat</Text>
-            <TextInput
-              value={renameText}
-              onChangeText={setRenameText}
-              autoFocus
-              selectTextOnFocus
-              onSubmitEditing={saveRename}
-              style={[styles.dialogInput, { color: colors.text, borderColor: colors.border }]}
-            />
-            <View style={styles.dialogButtons}>
-              <Pressable onPress={() => setRenaming(null)} style={styles.dialogButton}>
-                <Text style={{ color: colors.textSecondary, fontSize: 16 }}>Cancel</Text>
-              </Pressable>
-              <Pressable onPress={saveRename} style={[styles.dialogButton, { backgroundColor: colors.sendBg }]}>
-                <Text style={{ color: colors.sendFg, fontSize: 16, fontWeight: '600' }}>Save</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {chatMenu}
     </View>
   );
 }
@@ -249,12 +207,12 @@ const styles = StyleSheet.create({
   search: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12 },
   searchInput: { flex: 1, fontSize: 16, paddingVertical: 9 },
   newChatIcon: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  newChat: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   section: { fontSize: 13, fontWeight: '600', paddingHorizontal: 20, paddingTop: 18, paddingBottom: 6 },
   item: { marginHorizontal: 8, paddingHorizontal: 12, paddingVertical: 11, borderRadius: 10 },
   itemText: { fontSize: 16 },
   itemProject: { fontSize: 13, marginTop: 2 },
-  project: { flex: 1 },
+  grow: { flex: 1 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 14 },
   footer: {
     flexDirection: 'row',
@@ -265,10 +223,4 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   avatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  dialogBackdrop: { flex: 1, justifyContent: 'center', padding: 32 },
-  dialog: { borderRadius: 20, padding: 20, gap: 16 },
-  dialogTitle: { fontSize: 18, fontWeight: '600' },
-  dialogInput: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 },
-  dialogButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
-  dialogButton: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999 },
 });

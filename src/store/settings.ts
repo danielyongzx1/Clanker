@@ -46,6 +46,8 @@ interface SettingsState {
   memory: boolean;
   /** Whether a short request after each reply saves anything worth remembering from it. */
   memoryAuto: boolean;
+  /** Whether the chat lists show archived chats. */
+  showArchived: boolean;
   upsertEndpoint: (endpoint: Endpoint) => void;
   removeEndpoint: (id: string) => void;
   setActive: (ref: ModelRef) => void;
@@ -60,6 +62,7 @@ interface SettingsState {
   setCompression: (compression: CompressionConfig) => void;
   setMemory: (on: boolean) => void;
   setMemoryAuto: (on: boolean) => void;
+  setShowArchived: (on: boolean) => void;
 }
 
 export const useSettings = create<SettingsState>()(
@@ -78,6 +81,7 @@ export const useSettings = create<SettingsState>()(
       compression: COMPRESSION_DEFAULTS,
       memory: true,
       memoryAuto: true,
+      showArchived: false,
       upsertEndpoint: (endpoint) => {
         const exists = get().endpoints.some((e) => e.id === endpoint.id);
         const endpoints = exists
@@ -115,6 +119,7 @@ export const useSettings = create<SettingsState>()(
       setCompression: (compression) => set({ compression }),
       setMemory: (memory) => set({ memory }),
       setMemoryAuto: (memoryAuto) => set({ memoryAuto }),
+      setShowArchived: (showArchived) => set({ showArchived }),
     }),
     {
       name: 'settings',

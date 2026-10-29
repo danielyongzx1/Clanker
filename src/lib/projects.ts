@@ -81,6 +81,52 @@ export function deleteProject(id: string) {
   useProjects.getState().remove(id);
 }
 
+/** Workspace paths a chat has used: files it attached, files its tools wrote, and files the model read. */
+function filesOf(c: Conversation) {
+  const paths = new Set(Object.keys(c.observed ?? {}));
+  for (const m of c.messages) {
+    for (const p of m.content) {
+      if ((p.type === 'file' || p.type === 'image') && p.path) paths.add(p.path);
+      if (p.type === 'tool') p.files?.forEach((f) => paths.add(f));
+    }
+  }
+  return [...paths];
+}
+
+/**
+ * Moves a chat into a project, or out of one (null) into a workspace of its own, bringing its
+ * files. A workspace that was the chat's alone moves whole; from one it shared (a project's, or
+ * the one chats used before workspaces were per chat) it takes copies of the files it used, which
+ * the other chats may still need. A file whose path is taken at the destination gets a new name;
+ * those are returned as [old, new] pairs.
+ */
+export function moveChatToProject(chatId: string, projectId: string | null) {
+  const c = useChats.getState().conversations[chatId];
+  const renamed: [string, string][] = [];
+  if (!c || (c.projectId ?? null) === projectId) return renamed;
+  if (c.messages.some((m) => m.status === 'streaming')) throw new Error('Wait for the reply to finish first.');
+  const from = workspaceOf(c);
+  const to = projectId ? projectWorkspace(projectId) : chatWorkspace(chatId);
+  const own = from.key === `chat:${chatId}`;
+  const paths = own ? from.walk().map((e) => e.path) : filesOf(c);
+  for (const path of paths) {
+    const source = from.fileAt(path);
+    if (!source.exists) continue;
+    let dest = path;
+    if (to.fileAt(path).exists) {
+      const slash = path.lastIndexOf('/');
+      dest = to.freePath(path.slice(slash + 1), slash < 0 ? '' : path.slice(0, slash));
+      renamed.push([path, dest]);
+    }
+    to.ensureParent(dest);
+    if (own) source.moveSync(to.fileAt(dest));
+    else source.copySync(to.fileAt(dest));
+  }
+  if (own) from.remove();
+  useChats.getState().moveTo(chatId, projectId ?? undefined);
+  return renamed;
+}
+
 /** Lets the user pick files and copies them into the project's sources. */
 export async function addSources(projectId: string): Promise<{ added: string[]; failed: string[] }> {
   // No cache copy, as in lib/attachments: the picker's content:// URI is what reads reliably.

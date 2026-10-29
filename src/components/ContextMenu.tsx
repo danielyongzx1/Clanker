@@ -103,6 +103,10 @@ export function ContextMenu({
             <Pressable
               key={item.label}
               onPress={() => {
+                // Gone at once rather than fading: the action may open a dialog of its own, and on
+                // iOS a modal still going away would take a newly presented one with it.
+                open.set(0);
+                setShown(null);
                 onClose();
                 item.onPress();
               }}

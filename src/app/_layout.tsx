@@ -6,6 +6,7 @@ import { Appearance } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { DialogHost } from '@/components/Dialogs';
 import { ScriptRuntime } from '@/components/ScriptRuntime';
 import { useTheme } from '@/lib/theme';
 import { useSettings } from '@/store/settings';
@@ -76,6 +77,7 @@ export default function RootLayout() {
               <Stack.Screen name="projects/edit" options={{ title: 'Edit project' }} />
               <Stack.Screen name="projects/instructions" options={{ title: 'Instructions' }} />
             </Stack>
+            <DialogHost />
             {runtimeOn && <ScriptRuntime />}
           </ThemeProvider>
         </SafeAreaProvider>

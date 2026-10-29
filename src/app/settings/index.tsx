@@ -46,6 +46,8 @@ export default function SettingsScreen() {
   const compression = useSettings((s) => s.compression);
   const memory = useSettings((s) => s.memory);
   const setMemory = useSettings((s) => s.setMemory);
+  const showArchived = useSettings((s) => s.showArchived);
+  const setShowArchived = useSettings((s) => s.setShowArchived);
   const memoryCount = useMemory((s) => s.memories.filter((m) => !m.projectId).length);
 
   const { on, total } = countOn(disabledTools);
@@ -98,6 +100,13 @@ export default function SettingsScreen() {
           value={memory}
           onValueChange={setMemory}
           onPress={() => router.push('/settings/memory')}
+        />
+        <ToggleRow
+          icon="archive"
+          title="Show archived chats"
+          detail="List archived chats in the sidebar and in projects"
+          value={showArchived}
+          onValueChange={setShowArchived}
         />
         <ToggleRow
           icon="bar-chart-2"
