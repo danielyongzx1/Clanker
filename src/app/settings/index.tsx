@@ -12,6 +12,7 @@ import { SEARCH_PROVIDERS } from '@/lib/tools/web';
 import { updatesSupported } from '@/lib/updates';
 import { useMemory } from '@/store/memory';
 import { useSettings, type FollowUpMode, type ThemePreference } from '@/store/settings';
+import { useUpdates } from '@/store/updates';
 
 const THEMES: { value: ThemePreference; label: string; icon: 'smartphone' | 'sun' | 'moon' }[] = [
   { value: 'system', label: 'System', icon: 'smartphone' },
@@ -64,6 +65,10 @@ export default function SettingsScreen() {
   const followUp = useSettings((s) => s.followUp);
   const setFollowUp = useSettings((s) => s.setFollowUp);
   const memoryCount = useMemory((s) => s.memories.filter((m) => !m.projectId).length);
+  const checkOnLaunch = useUpdates((s) => s.checkOnLaunch);
+  const setCheckOnLaunch = useUpdates((s) => s.setCheckOnLaunch);
+  const prereleases = useUpdates((s) => s.prereleases);
+  const setPrereleases = useUpdates((s) => s.setPrereleases);
 
   const { on, total } = countOn(disabledTools);
 
@@ -179,8 +184,29 @@ export default function SettingsScreen() {
       </Section>
 
       {updatesSupported && (
-        <Section title="Updates" footer="New versions come from the app's GitHub releases.">
+        <Section
+          title="Updates"
+          footer={
+            prereleases
+              ? "New versions come from the app's GitHub releases, including pre-releases: early builds that may be unfinished."
+              : "New versions come from the app's GitHub releases."
+          }
+        >
           <UpdateRow />
+          <ToggleRow
+            icon="power"
+            title="Check on launch"
+            detail="Look for a new version when Clanker opens, at most once a day"
+            value={checkOnLaunch}
+            onValueChange={setCheckOnLaunch}
+          />
+          <ToggleRow
+            icon="git-branch"
+            title="Include pre-releases"
+            detail="Offer beta builds as well as stable releases"
+            value={prereleases}
+            onValueChange={setPrereleases}
+          />
         </Section>
       )}
 

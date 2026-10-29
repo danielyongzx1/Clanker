@@ -83,12 +83,16 @@ export function UpdateRow() {
   }
 }
 
-/** Mount once, at the root: checks on launch, at most once a day, and only speaks up when there's an update. */
+/**
+ * Mount once, at the root: checks on launch unless turned off, at most once a day, and only
+ * speaks up when there's an update.
+ */
 export function UpdateCheck() {
   useEffect(() => {
     // Development builds carry whatever version app.json has, so every release would look newer.
     if (!updatesSupported || __DEV__) return;
-    if (Date.now() - useUpdates.getState().lastCheck < DAY) return;
+    const { checkOnLaunch, lastCheck } = useUpdates.getState();
+    if (!checkOnLaunch || Date.now() - lastCheck < DAY) return;
     const timer = setTimeout(() => {
       useUpdates
         .getState()

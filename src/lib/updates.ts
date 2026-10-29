@@ -4,8 +4,9 @@ import { startActivityAsync } from 'expo-intent-launcher';
 import { Platform } from 'react-native';
 
 /**
- * Updates come from the newest stable GitHub release that has an APK attached, tagged with the
- * app version it carries (`v1.2.0` or `1.2.0`). Android only: iOS apps can't install themselves.
+ * Updates come from the newest GitHub release that has an APK attached, tagged with the app
+ * version it carries (`v1.2.0`, `1.2.0` or `v1.2.0-beta.1`). Pre-releases count only when asked
+ * for. Android only: iOS apps can't install themselves.
  */
 
 const REPO = 'DANIE4588E/Clanker';
@@ -27,30 +28,65 @@ export type Release = {
   apkSize: number;
 };
 
-/** Numeric parts of a version, ignoring a leading `v` and anything after a `-` or `+`. */
-const parts = (version: string) =>
-  version
-    .replace(/^v/i, '')
-    .split(/[-+]/)[0]
-    .split('.')
-    .map((n) => parseInt(n, 10) || 0);
+/**
+ * A version's numeric parts and its pre-release tag (`beta.1` in `1.2.0-beta.1`), ignoring a
+ * leading `v` and build metadata after a `+`.
+ */
+function parse(version: string) {
+  const [core, pre = ''] = version.replace(/^v/i, '').split('+')[0].split(/-(.*)/);
+  return { nums: core.split('.').map((n) => parseInt(n, 10) || 0), pre: pre ? pre.split('.') : [] };
+}
 
+/** Semver order: `1.2.0-beta.1` < `1.2.0-beta.2` < `1.2.0-rc.1` < `1.2.0`. */
 export function isNewer(version: string, than: string) {
-  const a = parts(version);
-  const b = parts(than);
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const d = (a[i] ?? 0) - (b[i] ?? 0);
+  const a = parse(version);
+  const b = parse(than);
+  for (let i = 0; i < Math.max(a.nums.length, b.nums.length); i++) {
+    const d = (a.nums[i] ?? 0) - (b.nums[i] ?? 0);
     if (d) return d > 0;
+  }
+  // Same numbers: the release itself beats any of its pre-releases.
+  if (!a.pre.length || !b.pre.length) return !a.pre.length && !!b.pre.length;
+  for (let i = 0; i < Math.max(a.pre.length, b.pre.length); i++) {
+    const x = a.pre[i];
+    const y = b.pre[i];
+    // More identifiers sort later when the shared ones match.
+    if (x === undefined || y === undefined) return y === undefined;
+    if (x === y) continue;
+    const nx = /^\d+$/.test(x);
+    const ny = /^\d+$/.test(y);
+    if (nx && ny) return Number(x) > Number(y);
+    // Numbers sort before words.
+    if (nx !== ny) return ny;
+    return x > y;
   }
   return false;
 }
 
-/** The latest release when it is newer than this build, else null. */
-export async function fetchNewerRelease(): Promise<Release | null> {
+type GitHubRelease = {
+  tag_name: string;
+  body: string | null;
+  draft: boolean;
+  assets: { name: string; browser_download_url: string; size: number }[];
+};
+
+function toRelease(json: GitHubRelease): Release | null {
+  const apk = json.assets.find((a) => a.name.toLowerCase().endsWith('.apk'));
+  if (!apk) return null;
+  const version = json.tag_name.replace(/^v/i, '');
+  return { version, notes: json.body ?? '', apkUrl: apk.browser_download_url, apkSize: apk.size };
+}
+
+/**
+ * The newest release when it is newer than this build, else null. With prereleases, the newest
+ * of the recent releases, pre-release or not; otherwise only the latest stable one.
+ */
+export async function fetchNewerRelease(prereleases = false): Promise<Release | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT);
   try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+    const url = `https://api.github.com/repos/${REPO}/releases${prereleases ? '?per_page=30' : '/latest'}`;
+    const res = await fetch(url, {
       headers: { Accept: 'application/vnd.github+json' },
       signal: controller.signal,
     });
@@ -58,12 +94,12 @@ export async function fetchNewerRelease(): Promise<Release | null> {
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`GitHub answered ${res.status}.`);
     const json = await res.json();
-    const apk = (json.assets as { name: string; browser_download_url: string; size: number }[]).find((a) =>
-      a.name.toLowerCase().endsWith('.apk')
-    );
-    const version = String(json.tag_name).replace(/^v/i, '');
-    if (!apk || !isNewer(version, currentVersion)) return null;
-    return { version, notes: json.body ?? '', apkUrl: apk.browser_download_url, apkSize: apk.size };
+    const candidates = (prereleases ? (json as GitHubRelease[]) : [json as GitHubRelease])
+      .filter((r) => !r.draft)
+      .map(toRelease)
+      .filter((r): r is Release => !!r);
+    const newest = candidates.reduce<Release | null>((best, r) => (!best || isNewer(r.version, best.version) ? r : best), null);
+    return newest && isNewer(newest.version, currentVersion) ? newest : null;
   } catch (e) {
     if (controller.signal.aborted) throw new Error("GitHub didn't answer in time.");
     throw e;

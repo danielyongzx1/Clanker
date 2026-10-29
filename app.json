@@ -2,7 +2,7 @@
   "expo": {
     "name": "Clanker",
     "slug": "Clanker",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "scheme": "clanker",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

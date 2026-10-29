@@ -18,7 +18,13 @@ export type UpdatePhase =
 interface UpdatesState {
   /** When GitHub was last asked, in ms; the launch check skips a day after it. */
   lastCheck: number;
+  /** Whether launching the app asks GitHub, at most once a day. */
+  checkOnLaunch: boolean;
+  /** Whether pre-releases count as updates, not just stable releases. */
+  prereleases: boolean;
   status: UpdatePhase;
+  setCheckOnLaunch: (on: boolean) => void;
+  setPrereleases: (on: boolean) => void;
   /** The newer release, or null. Throws when GitHub can't be reached. */
   check: () => Promise<Release | null>;
   /** Downloads the release, then opens the installer. */
@@ -38,11 +44,21 @@ export const useUpdates = create<UpdatesState>()(
   persist(
     (set, get) => ({
       lastCheck: 0,
+      checkOnLaunch: true,
+      prereleases: false,
       status: { phase: 'idle' },
+      setCheckOnLaunch: (checkOnLaunch) => set({ checkOnLaunch }),
+      setPrereleases: (prereleases) => {
+        const { phase } = get().status;
+        // What the last check found may no longer apply; a download under way carries on.
+        const stale = phase === 'current' || phase === 'available' || phase === 'failed';
+        // Due a fresh look at launch too, rather than waiting out the day.
+        set({ prereleases, lastCheck: 0, ...(stale && { status: { phase: 'idle' } }) });
+      },
       check: async () => {
         set({ status: { phase: 'checking' } });
         try {
-          const release = await fetchNewerRelease();
+          const release = await fetchNewerRelease(get().prereleases);
           set({ lastCheck: Date.now(), status: release ? { phase: 'available', release } : { phase: 'current' } });
           return release;
         } catch (e) {
@@ -86,6 +102,10 @@ export const useUpdates = create<UpdatesState>()(
         }
       },
     }),
-    { name: 'updates', storage: jsonFileStorage, partialize: (s) => ({ lastCheck: s.lastCheck }) }
+    {
+      name: 'updates',
+      storage: jsonFileStorage,
+      partialize: (s) => ({ lastCheck: s.lastCheck, checkOnLaunch: s.checkOnLaunch, prereleases: s.prereleases }),
+    }
   )
 );
