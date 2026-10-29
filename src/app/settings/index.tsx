@@ -1,118 +1,161 @@
-import Feather from '@expo/vector-icons/Feather';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import type { ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Row, Section, ToggleRow } from '@/components/Form';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { PROVIDER_LABELS } from '@/lib/providers';
+import { shellAvailable } from '@/lib/tools';
+import { entryOn, LOCAL_TOOL_GROUPS, WEB_TOOLS } from '@/lib/tools/catalog';
 import { useTheme } from '@/lib/theme';
-import { useSettings, type ThemePreference } from '@/store/settings';
+import { SEARCH_PROVIDERS } from '@/lib/tools/web';
+import { useMemory } from '@/store/memory';
+import { useSettings, type FollowUpMode, type ThemePreference } from '@/store/settings';
 
-function Section({ title, children, footer }: { title: string; children: ReactNode; footer?: string }) {
-  const { colors } = useTheme();
-  return (
-    <View style={styles.section}>
-      <Text style={[styles.sectionTitle, { color: colors.textTertiary }]}>{title}</Text>
-      <View style={[styles.card, { backgroundColor: colors.surface }]}>{children}</View>
-      {footer && <Text style={[styles.footer, { color: colors.textTertiary }]}>{footer}</Text>}
-    </View>
-  );
-}
-
-const THEMES: { value: ThemePreference; label: string; icon: keyof typeof Feather.glyphMap }[] = [
+const THEMES: { value: ThemePreference; label: string; icon: 'smartphone' | 'sun' | 'moon' }[] = [
   { value: 'system', label: 'System', icon: 'smartphone' },
   { value: 'light', label: 'Light', icon: 'sun' },
   { value: 'dark', label: 'Dark', icon: 'moon' },
 ];
+
+const FOLLOW_UPS: { value: FollowUpMode; label: string; icon: 'list' | 'corner-down-right' }[] = [
+  { value: 'queue', label: 'Queue', icon: 'list' },
+  { value: 'steer', label: 'Steer', icon: 'corner-down-right' },
+];
+
+/** How many of the listed tools are on, out of those this device has. */
+function countOn(disabled: string[]) {
+  const entries = LOCAL_TOOL_GROUPS.flatMap((g) => g.tools).filter((e) => shellAvailable() || !e.names.includes('run_shell'));
+  return { on: entries.filter((e) => entryOn(e, disabled)).length, total: entries.length };
+}
+
+function webDetail(provider: string, disabled: string[]) {
+  const [search, fetch] = WEB_TOOLS.map((e) => entryOn(e, disabled));
+  if (search && fetch) return `Search with ${provider} and read pages`;
+  if (search) return `Search with ${provider}`;
+  return fetch ? 'Read web pages' : 'Every web tool is turned off';
+}
 
 export default function SettingsScreen() {
   const { colors } = useTheme();
   const endpoints = useSettings((s) => s.endpoints);
   const theme = useSettings((s) => s.theme);
   const setTheme = useSettings((s) => s.setTheme);
+  const tools = useSettings((s) => s.tools);
+  const setTools = useSettings((s) => s.setTools);
+  const disabledTools = useSettings((s) => s.disabledTools);
+  const web = useSettings((s) => s.web);
+  const setWeb = useSettings((s) => s.setWeb);
+  const searchProvider = useSettings((s) => s.search.provider);
+  const contextUsage = useSettings((s) => s.contextUsage);
+  const setContextUsage = useSettings((s) => s.setContextUsage);
+  const compression = useSettings((s) => s.compression);
+  const memory = useSettings((s) => s.memory);
+  const setMemory = useSettings((s) => s.setMemory);
+  const showArchived = useSettings((s) => s.showArchived);
+  const setShowArchived = useSettings((s) => s.setShowArchived);
+  const followUp = useSettings((s) => s.followUp);
+  const setFollowUp = useSettings((s) => s.setFollowUp);
+  const memoryCount = useMemory((s) => s.memories.filter((m) => !m.projectId).length);
+
+  const { on, total } = countOn(disabledTools);
 
   return (
     <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={styles.content}>
-      <Section
-        title="ENDPOINTS"
-        footer="Connect any OpenAI-compatible, Anthropic, Ollama or Gemini API. Keys are stored in the device keychain."
-      >
-        {endpoints.map((e, i) => (
-          <Pressable
+      <Section title="Models" footer="Connect any OpenAI-compatible, Anthropic, Ollama or Gemini API. Keys stay in the device keychain.">
+        {endpoints.map((e) => (
+          <Row
             key={e.id}
+            icon="server"
+            title={e.name}
+            detail={`${PROVIDER_LABELS[e.type]} · ${e.models.length} model${e.models.length === 1 ? '' : 's'}`}
             onPress={() => router.push({ pathname: '/settings/endpoint', params: { id: e.id } })}
-            style={({ pressed }) => [
-              styles.row,
-              i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-              pressed && { backgroundColor: colors.surfaceHover },
-            ]}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.rowTitle, { color: colors.text }]}>{e.name}</Text>
-              <Text numberOfLines={1} style={[styles.rowDetail, { color: colors.textTertiary }]}>
-                {PROVIDER_LABELS[e.type]} · {e.models.length} model{e.models.length === 1 ? '' : 's'}
-              </Text>
-            </View>
-            <Feather name="chevron-right" size={18} color={colors.textTertiary} />
-          </Pressable>
+          />
         ))}
-        <Pressable
-          onPress={() => router.push('/settings/endpoint')}
-          style={({ pressed }) => [
-            styles.row,
-            endpoints.length > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-            pressed && { backgroundColor: colors.surfaceHover },
-          ]}
-        >
-          <Feather name="plus" size={18} color={colors.link} />
-          <Text style={[styles.rowTitle, { color: colors.link }]}>Add endpoint</Text>
-        </Pressable>
+        <Row icon="plus" title="Add endpoint" tint="link" onPress={() => router.push('/settings/endpoint')} />
       </Section>
 
-      <Section title="APPEARANCE">
+      <Section title="Agent" footer="Turn these off for models that don't support tool calling.">
+        <ToggleRow
+          icon="tool"
+          title="Files & code"
+          detail={
+            on === total
+              ? `Work with files and run Python${Platform.OS === 'android' ? ', JavaScript and shell commands' : ' and JavaScript'} on this phone`
+              : `${on} of ${total} tools on`
+          }
+          value={tools}
+          onValueChange={setTools}
+          onPress={() => router.push('/settings/tools')}
+        />
+        <ToggleRow
+          icon="globe"
+          title="Web access"
+          detail={tools ? webDetail(SEARCH_PROVIDERS[searchProvider].label, disabledTools) : 'Needs files & code'}
+          value={web && tools}
+          onValueChange={setWeb}
+          onPress={() => router.push('/settings/search')}
+          disabled={!tools}
+        />
+        <Row icon="folder" title="Workspace files" onPress={() => router.push('/settings/workspace')} />
+      </Section>
+
+      <Section title="Chats">
+        <ToggleRow
+          icon="bookmark"
+          title="Memory"
+          detail={memoryCount ? `${memoryCount} saved memor${memoryCount === 1 ? 'y' : 'ies'}` : 'Remember things about you across chats'}
+          value={memory}
+          onValueChange={setMemory}
+          onPress={() => router.push('/settings/memory')}
+        />
+        <ToggleRow
+          icon="archive"
+          title="Show archived chats"
+          detail="List archived chats in the sidebar and in projects"
+          value={showArchived}
+          onValueChange={setShowArchived}
+        />
+        <ToggleRow
+          icon="bar-chart-2"
+          title="Context meter"
+          detail="Show how much of the model's context a chat uses while you type"
+          value={contextUsage}
+          onValueChange={setContextUsage}
+        />
+        <Row
+          icon="minimize-2"
+          title="Auto-compression"
+          value={`${compression.trigger}% → ${compression.target}%`}
+          onPress={() => router.push('/settings/context')}
+        />
+      </Section>
+
+      <Section
+        title="Sending during a reply"
+        footer={
+          followUp === 'steer'
+            ? 'Messages join the reply at its next step, so the model can change course mid-task.'
+            : 'Messages wait above the box and go out one by one when the reply is done. Steer any of them in early from there.'
+        }
+      >
         <View style={styles.segment}>
-          {THEMES.map((t) => {
-            const selected = theme === t.value;
-            return (
-              <Pressable
-                key={t.value}
-                onPress={() => setTheme(t.value)}
-                style={[styles.segmentItem, selected && { backgroundColor: colors.background }]}
-              >
-                <Feather name={t.icon} size={16} color={selected ? colors.text : colors.textSecondary} />
-                <Text style={{ color: selected ? colors.text : colors.textSecondary, fontWeight: selected ? '600' : '400' }}>
-                  {t.label}
-                </Text>
-              </Pressable>
-            );
-          })}
+          <SegmentedControl options={FOLLOW_UPS} value={followUp} onChange={setFollowUp} />
         </View>
       </Section>
 
-      <Text style={[styles.version, { color: colors.textTertiary }]}>
-        Clanker {Constants.expoConfig?.version ?? ''}
-      </Text>
+      <Section title="Appearance">
+        <View style={styles.segment}>
+          <SegmentedControl options={THEMES} value={theme} onChange={setTheme} />
+        </View>
+      </Section>
+
+      <Text style={[styles.version, { color: colors.textTertiary }]}>Clanker {Constants.expoConfig?.version ?? ''}</Text>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 48 },
-  section: { marginBottom: 24 },
-  sectionTitle: { fontSize: 13, fontWeight: '500', marginBottom: 8, marginLeft: 12 },
-  card: { borderRadius: 14, overflow: 'hidden' },
-  footer: { fontSize: 13, lineHeight: 18, marginTop: 8, marginHorizontal: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
-  rowTitle: { fontSize: 16 },
-  rowDetail: { fontSize: 13, marginTop: 2 },
-  segment: { flexDirection: 'row', padding: 4, gap: 4 },
-  segmentItem: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-  version: { textAlign: 'center', fontSize: 13 },
+  segment: { padding: 12 },
+  version: { textAlign: 'center', fontSize: 13, marginTop: 4 },
 });
