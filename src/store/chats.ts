@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
 import { deleteAttachment } from '@/lib/attachments';
-import type { ContentPart, Role, ToolPart } from '@/lib/providers';
+import type { AttachmentPart, ContentPart, Role, ToolPart } from '@/lib/providers';
 import { jsonFileStorage, uid } from '@/lib/storage';
 import { chatWorkspace } from '@/lib/workspace';
 import type { Memory } from './memory';
@@ -54,6 +54,15 @@ export interface ContextNote {
   memory?: string;
 }
 
+/** A message the user sent while a reply was running, waiting to go out. */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  attachments: AttachmentPart[];
+  /** Joins the running reply at its next step (see lib/chat) instead of waiting for it to finish. */
+  steer?: boolean;
+}
+
 export interface Conversation {
   id: string;
   title: string;
@@ -88,6 +97,8 @@ export interface Conversation {
   pinnedAt?: number;
   /** When it was archived: hidden from the chat lists unless Settings shows archived chats. */
   archivedAt?: number;
+  /** Messages waiting for the running reply, oldest first. */
+  queue?: QueuedMessage[];
 }
 
 interface ChatsState {
@@ -119,6 +130,7 @@ interface ChatsState {
   settleDrafts: (id: string, messageId: string, parts: ContentPart[]) => void;
   setCompressions: (id: string, blocks: CompressionBlock[]) => void;
   setNote: (id: string, key: string, note: ContextNote) => void;
+  setQueue: (id: string, queue: QueuedMessage[]) => void;
   setMemoryBase: (id: string, memories: Memory[]) => void;
   /** Records file signatures as seen by the model; null forgets a path. */
   observe: (id: string, entries: Record<string, string | null>) => void;
@@ -131,7 +143,7 @@ function isDraft(part: ContentPart): boolean {
   return part.type === 'tool' && part.status === 'writing';
 }
 
-function imagesOf(messages: Message[]) {
+function imagesOf(messages: Pick<Message, 'content'>[]) {
   return messages.flatMap((m) =>
     m.content.flatMap((p) =>
       p.type === 'tool'
@@ -185,7 +197,7 @@ export const useChats = create<ChatsState>()(
         remove: (id) => {
           const c = get().conversations[id];
           if (!c) return;
-          imagesOf(c.messages).forEach(deleteAttachment);
+          imagesOf([...c.messages, ...(c.queue ?? []).map((q) => ({ content: q.attachments }))]).forEach(deleteAttachment);
           if (!c.projectId && !c.workspace) {
             try {
               chatWorkspace(id).remove();
@@ -263,6 +275,7 @@ export const useChats = create<ChatsState>()(
           }),
         setCompressions: (id, compressions) => patchConversation(id, () => ({ compressions })),
         setNote: (id, key, note) => patchConversation(id, (c) => ({ notes: { ...c.notes, [key]: note } })),
+        setQueue: (id, queue) => patchConversation(id, () => ({ queue: queue.length ? queue : undefined })),
         setMemoryBase: (id, memoryBase) => patchConversation(id, () => ({ memoryBase })),
         observe: (id, entries) =>
           patchConversation(id, (c) => {
@@ -293,10 +306,12 @@ export const useChats = create<ChatsState>()(
         if (version < 1) for (const c of Object.values(state?.conversations ?? {})) c.workspace = 'shared';
         return state;
       },
-      // A reply, tool call or background job that was running when the app was killed can never finish.
+      // A reply, tool call or background job that was running when the app was killed can never finish,
+      // and messages meant to steer it wait in the queue like any other.
       merge: (persisted, current) => {
         const conversations = (persisted as Pick<ChatsState, 'conversations'>)?.conversations ?? {};
         for (const c of Object.values(conversations)) {
+          if (c.queue) c.queue = c.queue.map(({ steer: _, ...q }) => q);
           c.messages = c.messages.map((m) => {
             const content = m.content.map((p) =>
               p.type === 'tool' && p.background?.status === 'running' ? { ...p, background: { ...p.background, status: 'lost' as const } } : p

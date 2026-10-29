@@ -12,7 +12,7 @@ import { EdgeFade } from '@/components/EdgeFade';
 import { EmptyState } from '@/components/EmptyState';
 import { MessageList } from '@/components/MessageList';
 import { ModelPicker } from '@/components/ModelPicker';
-import { regenerate, sendMessage, stopStreaming } from '@/lib/chat';
+import { regenerate, stopStreaming, submitMessage } from '@/lib/chat';
 import type { AttachmentPart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 import { useContextUsage } from '@/lib/usage';
@@ -100,7 +100,8 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
   const send = useCallback(
     (text: string, attachments: AttachmentPart[]) => {
       try {
-        const id = sendMessage(currentId, text, attachments);
+        // While a reply runs, this queues the message or steers the reply with it.
+        const id = submitMessage(currentId, text, attachments);
         if (id !== currentId) open(id);
         setDraft('');
       } catch (e) {
@@ -144,6 +145,7 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
             </Animated.View>
           )}
           <ComposerDock
+            conversationId={currentId}
             draft={draft}
             onChangeDraft={setDraft}
             streaming={streaming}

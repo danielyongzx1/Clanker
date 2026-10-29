@@ -1,7 +1,7 @@
 import Feather from '@expo/vector-icons/Feather';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type HostInstance, type TextInputInstance } from 'react-native';
 import Animated, { Easing, interpolate, useAnimatedStyle, withTiming, type SharedValue } from 'react-native-reanimated';
 import { AttachmentMenu, type AttachAction } from '@/components/AttachmentMenu';
@@ -32,9 +32,21 @@ export function composerGrowth(progress: number) {
   return interpolate(progress, [0, 1], [0, EXPANDED.padBottom - COLLAPSED.padBottom]);
 }
 
+/** The box's distance from either side of the screen at a given progress. */
+export function composerMargin(progress: number) {
+  'worklet';
+  return interpolate(progress, [0, 1], [COLLAPSED.margin, EXPANDED.margin]);
+}
+
 type Props = {
   text: string;
   onChangeText: (text: string) => void;
+  /** Held by the dock, so a queued message can be brought back here to edit. */
+  attachments: AttachmentPart[];
+  onChangeAttachments: Dispatch<SetStateAction<AttachmentPart[]>>;
+  placeholder: string;
+  inputRef: RefObject<TextInputInstance | null>;
+  /** While a reply streams, Stop shows beside Send, or alone when there's nothing to send. */
   streaming: boolean;
   onSend: (text: string, attachments: AttachmentPart[]) => void;
   onStop: () => void;
@@ -49,14 +61,28 @@ type Props = {
   progress: SharedValue<number>;
 };
 
-export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboardVisible, effort, context, progress }: Props) {
+export function Composer({
+  text,
+  onChangeText,
+  attachments,
+  onChangeAttachments: setAttachments,
+  placeholder,
+  inputRef: input,
+  streaming,
+  onSend,
+  onStop,
+  keyboardVisible,
+  effort,
+  context,
+  progress,
+}: Props) {
   const { colors } = useTheme();
-  const [attachments, setAttachments] = useState<AttachmentPart[]>([]);
   const [importing, setImporting] = useState(false);
   const images = attachments.filter((a): a is ImagePart => a.type === 'image');
   const files = attachments.filter((a): a is FilePart => a.type === 'file');
-  const canSend = !streaming && !importing && (text.trim().length > 0 || attachments.length > 0);
-  const input = useRef<TextInputInstance>(null);
+  const canSend = !importing && (text.trim().length > 0 || attachments.length > 0);
+  // While a reply streams, sending queues or steers, and Stop stays beside Send.
+  const bothButtons = streaming && canSend;
   // A zero-impact overlay inside the box that we can measure (Animated.View refs are awkwardly
   // typed); its window position is the box's content top-left.
   const box = useRef<HostInstance>(null);
@@ -66,7 +92,8 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
   const [popover, setPopover] = useState<'attach' | 'context' | null>(null);
   const [anchor, setAnchor] = useState({ x: TOOLBAR_PAD + 8, right: COLLAPSED.margin, bottom: 96 });
   // Collapsed, the text runs up to the right-hand buttons, so leave room for the effort one too.
-  const collapsedPadRight = COLLAPSED.padRight + (effort ? BUTTON + TOOLBAR_GAP : 0);
+  const collapsedPadRight =
+    COLLAPSED.padRight + (effort ? BUTTON + TOOLBAR_GAP : 0) + (bothButtons ? BUTTON + TOOLBAR_GAP : 0);
 
   // Expand for exactly as long as the keyboard is on screen. Driving this from the keyboard
   // rather than focus means tapping a toolbar button (which blurs the TextInput) keeps the box
@@ -82,10 +109,10 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
     const blur = () => input.current?.blur();
     const subs = [Keyboard.addListener('keyboardWillHide', blur), Keyboard.addListener('keyboardDidHide', blur)];
     return () => subs.forEach((s) => s.remove());
-  }, []);
+  }, [input]);
 
   const boxStyle = useAnimatedStyle(() => ({
-    marginHorizontal: interpolate(progress.value, [0, 1], [COLLAPSED.margin, EXPANDED.margin]),
+    marginHorizontal: composerMargin(progress.value),
     paddingBottom: COLLAPSED.padBottom + composerGrowth(progress.value),
   }));
   const inputStyle = useAnimatedStyle(() => ({
@@ -200,7 +227,7 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
           ref={input}
           value={text}
           onChangeText={onChangeText}
-          placeholder="Ask anything"
+          placeholder={placeholder}
           placeholderTextColor={colors.textTertiary}
           multiline
           style={[styles.input, { color: colors.text }]}
@@ -243,16 +270,21 @@ export function Composer({ text, onChangeText, streaming, onSend, onStop, keyboa
               <EffortMeter levels={effort.levels} level={effort.level} />
             </Pressable>
           )}
-          {streaming ? (
+          {streaming && (
             <Pressable
               onPress={onStop}
               hitSlop={6}
-              style={[styles.circle, { backgroundColor: colors.accent }]}
+              style={({ pressed }) => [
+                styles.circle,
+                !bothButtons && { backgroundColor: colors.accent },
+                bothButtons && pressed && { opacity: 0.5 },
+              ]}
               accessibilityLabel="Stop"
             >
-              <View style={[styles.stop, { backgroundColor: colors.accentFg }]} />
+              <View style={[styles.stop, { backgroundColor: bothButtons ? colors.text : colors.accentFg }]} />
             </Pressable>
-          ) : (
+          )}
+          {(!streaming || bothButtons) && (
             <Pressable
               onPress={send}
               disabled={!canSend}

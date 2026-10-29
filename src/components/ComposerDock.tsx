@@ -1,20 +1,23 @@
 import { useIsFocused } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Keyboard, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Keyboard, Pressable, StyleSheet, View, type TextInputInstance } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { OverKeyboardView } from 'react-native-keyboard-controller';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 import { useShallow } from 'zustand/react/shallow';
+import { deleteQueued, sendQueuedNow, takeQueued } from '@/lib/chat';
 import type { AttachmentPart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 import type { ContextUsage } from '@/lib/usage';
+import { useChats } from '@/store/chats';
 import { resolveEffort, useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
 import { Composer, composerGrowth } from './Composer';
 import { EdgeFade } from './EdgeFade';
 import { EffortSlider } from './EffortSlider';
+import { QueuedMessages } from './QueuedMessages';
 
 // Effort panel backdrop: a solid wash of background from just above the label down to the
 // screen bottom, with a fade of VEIL_FADE above it, so text behind the panel drops out.
@@ -40,6 +43,8 @@ function useKeyboard() {
 }
 
 type Props = {
+  /** The chat it sends to, whose queued messages show above the box; none for a chat yet to start. */
+  conversationId?: string | null;
   draft: string;
   onChangeDraft: (text: string) => void;
   streaming: boolean;
@@ -56,8 +61,22 @@ type Props = {
  * The composer floating at the bottom of a screen, with the effort slider that cross-fades with
  * it. Place it inside the screen's keyboard-avoiding box, over the content it fades out.
  */
-export function ComposerDock({ draft, onChangeDraft, streaming, onSend, onStop, usage, progress, onBaseHeight }: Props) {
+export function ComposerDock({
+  conversationId,
+  draft,
+  onChangeDraft,
+  streaming,
+  onSend,
+  onStop,
+  usage,
+  progress,
+  onBaseHeight,
+}: Props) {
   const { colors } = useTheme();
+  const [attachments, setAttachments] = useState<AttachmentPart[]>([]);
+  const input = useRef<TextInputInstance>(null);
+  const queue = useChats((s) => (conversationId ? s.conversations[conversationId]?.queue : undefined));
+  const followUp = useSettings((s) => s.followUp);
   const insets = useSafeAreaInsets();
   const active = useSettings((s) => s.active);
   const effort = useSettings(useShallow((s) => resolveEffort(s, s.active)));
@@ -106,6 +125,23 @@ export function ComposerDock({ draft, onChangeDraft, streaming, onSend, onStop, 
   const effortStyle = useAnimatedStyle(() => ({ opacity: effortFade.value }));
   const composerStyle = useAnimatedStyle(() => ({ opacity: 1 - effortFade.value }));
 
+  // Editing brings a queued message back into the box, after anything already being written there.
+  const editQueued = (id: string) => {
+    const message = conversationId && takeQueued(conversationId, id);
+    if (!message) return;
+    onChangeDraft([draft.trimEnd(), message.text].filter(Boolean).join('\n\n'));
+    setAttachments((prev) => [...prev, ...message.attachments]);
+    input.current?.focus();
+  };
+  const sendNow = (id: string) => {
+    if (!conversationId) return;
+    try {
+      sendQueuedNow(conversationId, id);
+    } catch (e) {
+      Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const panelBottom = keyboardVisible ? keyboard.height + 8 : Math.max(insets.bottom, 8);
   const bottomPad = keyboardVisible ? 8 : Math.max(insets.bottom, 8);
 
@@ -127,9 +163,23 @@ export function ComposerDock({ draft, onChangeDraft, streaming, onSend, onStop, 
         {/* Faded out rather than unmounted while the slider is up, so attached images survive,
             and untouchable as a backstop in case the overlay window mounts a beat late. */}
         <Animated.View style={composerStyle} pointerEvents={showEffort ? 'none' : 'auto'}>
+          {conversationId && queue?.length ? (
+            <QueuedMessages
+              messages={queue}
+              streaming={streaming}
+              progress={progress}
+              onEdit={editQueued}
+              onDelete={(id) => deleteQueued(conversationId, id)}
+              onSendNow={sendNow}
+            />
+          ) : null}
           <Composer
             text={draft}
             onChangeText={onChangeDraft}
+            attachments={attachments}
+            onChangeAttachments={setAttachments}
+            placeholder={streaming ? (followUp === 'steer' ? 'Steer the reply' : 'Queue a follow-up') : 'Ask anything'}
+            inputRef={input}
             streaming={streaming}
             onSend={onSend}
             onStop={onStop}

@@ -1,7 +1,7 @@
-import { interruptContent, messageText, useChats } from '@/store/chats';
+import { interruptContent, messageText, useChats, type QueuedMessage } from '@/store/chats';
 import { resolveBudget, resolveEffort, useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
-import { readAttachmentBase64, saveToWorkspace } from './attachments';
+import { deleteAttachment, readAttachmentBase64, saveToWorkspace } from './attachments';
 import { autoCompress, buildWire, historyOf, historyTokens, unitsOf } from './context';
 import { ensureMemoryBase, extractMemories, memoryOn } from './memory';
 import { workspaceFor } from './projects';
@@ -37,19 +37,9 @@ function fallbackTitle(text: string) {
   return line ? (line.length > 40 ? line.slice(0, 40).trimEnd() + '…' : line) : 'Image';
 }
 
-/** Starts a new conversation (when `conversationId` is null) or continues one, and streams the reply. */
-export function sendMessage(conversationId: string | null, text: string, attachments: AttachmentPart[]) {
-  const { active, tools } = useSettings.getState();
-  if (!active) throw new Error('Add an endpoint in Settings to start chatting.');
-  const chats = useChats.getState();
-  const ui = useUI.getState();
-  const id =
-    conversationId ??
-    chats.create(active.endpointId, active.model, {
-      ...(ui.newChatMemoryOff ? { memory: false as const } : {}),
-      ...(ui.newChatProjectId ? { projectId: ui.newChatProjectId } : {}),
-    });
-
+/** Adds the user's message to the conversation. */
+function postUserMessage(id: string, text: string, attachments: AttachmentPart[]) {
+  const { tools } = useSettings.getState();
   // With tools on, attachments are also copied into the workspace so the agent can work on them.
   const ws = workspaceFor(id);
   const parts = tools
@@ -67,12 +57,28 @@ export function sendMessage(conversationId: string | null, text: string, attachm
     parts.flatMap((p) => (p.type === 'file' && p.path && p.text != null && !p.file ? [p.path] : []))
   );
 
-  chats.setModel(id, active.endpointId, active.model);
-  chats.addMessage(id, {
+  useChats.getState().addMessage(id, {
     role: 'user',
     content: [...parts, ...(text ? [{ type: 'text' as const, text }] : [])],
     status: 'done',
   });
+}
+
+/** Starts a new conversation (when `conversationId` is null) or continues one, and streams the reply. */
+export function sendMessage(conversationId: string | null, text: string, attachments: AttachmentPart[]) {
+  const { active } = useSettings.getState();
+  if (!active) throw new Error('Add an endpoint in Settings to start chatting.');
+  const chats = useChats.getState();
+  const ui = useUI.getState();
+  const id =
+    conversationId ??
+    chats.create(active.endpointId, active.model, {
+      ...(ui.newChatMemoryOff ? { memory: false as const } : {}),
+      ...(ui.newChatProjectId ? { projectId: ui.newChatProjectId } : {}),
+    });
+
+  chats.setModel(id, active.endpointId, active.model);
+  postUserMessage(id, text, attachments);
   if (!conversationId) chats.rename(id, fallbackTitle(text), false);
 
   void runCompletion(id);
@@ -92,6 +98,55 @@ export function stopStreaming(conversationId: string) {
   controllers.get(conversationId)?.abort();
 }
 
+const queueOf = (conversationId: string) => useChats.getState().conversations[conversationId]?.queue ?? [];
+
+/**
+ * Sends a message, or while a reply is running, queues it to go out once the reply is done or, as
+ * Settings choose, to steer the reply at its next step.
+ */
+export function submitMessage(conversationId: string | null, text: string, attachments: AttachmentPart[]) {
+  if (!conversationId || !controllers.has(conversationId)) return sendMessage(conversationId, text, attachments);
+  const message: QueuedMessage = { id: uid(), text, attachments };
+  if (useSettings.getState().followUp === 'steer') message.steer = true;
+  useChats.getState().setQueue(conversationId, [...queueOf(conversationId), message]);
+  return conversationId;
+}
+
+/** Sends the queued message (by default the oldest) as the next turn. It stays queued if sending fails. */
+function sendFromQueue(conversationId: string, queuedId?: string) {
+  const queue = queueOf(conversationId);
+  const message = queuedId ? queue.find((m) => m.id === queuedId) : queue[0];
+  if (!message) return;
+  useChats.getState().setQueue(conversationId, queue.filter((m) => m !== message));
+  try {
+    sendMessage(conversationId, message.text, message.attachments);
+  } catch (e) {
+    useChats.getState().setQueue(conversationId, queue);
+    throw e;
+  }
+}
+
+/** Steers the running reply with a queued message, or sends it right away when nothing is running. */
+export function sendQueuedNow(conversationId: string, queuedId: string) {
+  if (!controllers.has(conversationId)) return sendFromQueue(conversationId, queuedId);
+  useChats
+    .getState()
+    .setQueue(conversationId, queueOf(conversationId).map((m) => (m.id === queuedId ? { ...m, steer: true } : m)));
+}
+
+/** Takes a message out of the queue to be edited, its attachments kept. */
+export function takeQueued(conversationId: string, queuedId: string) {
+  const queue = queueOf(conversationId);
+  const message = queue.find((m) => m.id === queuedId);
+  if (message) useChats.getState().setQueue(conversationId, queue.filter((m) => m !== message));
+  return message;
+}
+
+export function deleteQueued(conversationId: string, queuedId: string) {
+  const message = takeQueued(conversationId, queuedId);
+  for (const a of message?.attachments ?? []) if (a.file) deleteAttachment(a.file);
+}
+
 async function runCompletion(id: string) {
   const chats = useChats.getState();
   const conversation = chats.conversations[id];
@@ -100,12 +155,15 @@ async function runCompletion(id: string) {
   const endpoint = settings.endpoints.find((e) => e.id === conversation.endpointId);
   const effort = resolveEffort(settings, { endpointId: conversation.endpointId, model: conversation.model });
 
-  const replyId = chats.addMessage(id, {
-    role: 'assistant',
-    content: [],
-    status: 'streaming',
-    model: conversation.model,
-  });
+  const startReply = () =>
+    useChats.getState().addMessage(id, {
+      role: 'assistant',
+      content: [],
+      status: 'streaming',
+      model: conversation.model,
+    });
+  // A steered reply goes on in a new message after the user's (see `steer`).
+  let replyId = startReply();
 
   if (!endpoint) {
     chats.updateMessage(id, replyId, { status: 'error', error: 'This endpoint no longer exists. Pick another model.' });
@@ -167,6 +225,23 @@ async function runCompletion(id: string) {
   const settleDrafts = (parts: ToolPart[]) => {
     drafts.clear();
     useChats.getState().settleDrafts(id, replyId, parts);
+  };
+  // Messages sent to steer the reply join it between steps, where the history is whole: the reply
+  // so far is closed, they follow it as one user turn, and a new reply picks up from there.
+  const steer = () => {
+    const queue = queueOf(id);
+    const steers = queue.filter((m) => m.steer);
+    if (!steers.length) return false;
+    const chats = useChats.getState();
+    chats.setQueue(id, queue.filter((m) => !m.steer));
+    chats.updateMessage(id, replyId, { status: 'done' });
+    postUserMessage(
+      id,
+      steers.map((m) => m.text).filter(Boolean).join('\n\n'),
+      steers.flatMap((m) => m.attachments)
+    );
+    replyId = startReply();
+    return true;
   };
 
   // Attachments and tool images are re-sent every step; read each file once per reply.
@@ -249,6 +324,11 @@ async function runCompletion(id: string) {
       markThoughtDone();
       if (!tools || !result.toolCalls.length) {
         settleDrafts([]);
+        // Rounds count per reply, and a steered one starts over.
+        if (steer()) {
+          step = 0;
+          continue;
+        }
         break;
       }
       // Read every step, so setting a limit mid-reply can rein in a model that's spinning.
@@ -295,6 +375,7 @@ async function runCompletion(id: string) {
         });
       }
       if (controller.signal.aborted) throw new Error('Stopped');
+      if (steer()) step = 0;
     }
     useChats.getState().updateMessage(id, replyId, { status: 'done' });
   } catch (e) {
@@ -311,6 +392,9 @@ async function runCompletion(id: string) {
   } finally {
     if (timer) clearTimeout(timer);
     controllers.delete(id);
+    // Steers that never reached a step boundary wait in the queue like any other message.
+    const queue = queueOf(id);
+    if (queue.some((m) => m.steer)) useChats.getState().setQueue(id, queue.map(({ steer: _, ...m }) => m));
   }
 
   const latest = useChats.getState().conversations[id];
@@ -319,6 +403,15 @@ async function runCompletion(id: string) {
   const managed = reply()?.content.some((p) => p.type === 'tool' && p.name.startsWith('memory_'));
   if (latest && !controller.signal.aborted && !managed && memoryOn(id) && useSettings.getState().memoryAuto) {
     void extractMemories(id, replyId, endpoint, apiKey, conversation.model);
+  }
+  // The next queued message goes out as the following turn. A stopped reply holds the queue until
+  // the user sends from it.
+  if (!controller.signal.aborted) {
+    try {
+      sendFromQueue(id);
+    } catch {
+      // No model to send with; the message stays queued.
+    }
   }
 }
 

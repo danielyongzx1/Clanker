@@ -9,12 +9,17 @@ import { entryOn, LOCAL_TOOL_GROUPS, WEB_TOOLS } from '@/lib/tools/catalog';
 import { useTheme } from '@/lib/theme';
 import { SEARCH_PROVIDERS } from '@/lib/tools/web';
 import { useMemory } from '@/store/memory';
-import { useSettings, type ThemePreference } from '@/store/settings';
+import { useSettings, type FollowUpMode, type ThemePreference } from '@/store/settings';
 
 const THEMES: { value: ThemePreference; label: string; icon: 'smartphone' | 'sun' | 'moon' }[] = [
   { value: 'system', label: 'System', icon: 'smartphone' },
   { value: 'light', label: 'Light', icon: 'sun' },
   { value: 'dark', label: 'Dark', icon: 'moon' },
+];
+
+const FOLLOW_UPS: { value: FollowUpMode; label: string; icon: 'list' | 'corner-down-right' }[] = [
+  { value: 'queue', label: 'Queue', icon: 'list' },
+  { value: 'steer', label: 'Steer', icon: 'corner-down-right' },
 ];
 
 /** How many of the listed tools are on, out of those this device has. */
@@ -48,6 +53,8 @@ export default function SettingsScreen() {
   const setMemory = useSettings((s) => s.setMemory);
   const showArchived = useSettings((s) => s.showArchived);
   const setShowArchived = useSettings((s) => s.setShowArchived);
+  const followUp = useSettings((s) => s.followUp);
+  const setFollowUp = useSettings((s) => s.setFollowUp);
   const memoryCount = useMemory((s) => s.memories.filter((m) => !m.projectId).length);
 
   const { on, total } = countOn(disabledTools);
@@ -121,6 +128,19 @@ export default function SettingsScreen() {
           value={`${compression.trigger}% → ${compression.target}%`}
           onPress={() => router.push('/settings/context')}
         />
+      </Section>
+
+      <Section
+        title="Sending during a reply"
+        footer={
+          followUp === 'steer'
+            ? 'Messages join the reply at its next step, so the model can change course mid-task.'
+            : 'Messages wait above the box and go out one by one when the reply is done. Steer any of them in early from there.'
+        }
+      >
+        <View style={styles.segment}>
+          <SegmentedControl options={FOLLOW_UPS} value={followUp} onChange={setFollowUp} />
+        </View>
       </Section>
 
       <Section title="Appearance">

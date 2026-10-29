@@ -12,6 +12,9 @@ export type CompressionConfig = { trigger: number; target: number };
 
 export const COMPRESSION_DEFAULTS: CompressionConfig = { trigger: 60, target: 30 };
 
+/** What sending does while a reply is running: wait for it to finish, or steer it mid-task. */
+export type FollowUpMode = 'queue' | 'steer';
+
 export type SearchProvider = 'firecrawl' | 'duckduckgo' | 'exa' | 'brave' | 'tavily' | 'searxng';
 
 /** Where web_search sends queries. Keys live in SecureStore under `search-<provider>`. */
@@ -48,6 +51,7 @@ interface SettingsState {
   memoryAuto: boolean;
   /** Whether the chat lists show archived chats. */
   showArchived: boolean;
+  followUp: FollowUpMode;
   upsertEndpoint: (endpoint: Endpoint) => void;
   removeEndpoint: (id: string) => void;
   setActive: (ref: ModelRef) => void;
@@ -63,6 +67,7 @@ interface SettingsState {
   setMemory: (on: boolean) => void;
   setMemoryAuto: (on: boolean) => void;
   setShowArchived: (on: boolean) => void;
+  setFollowUp: (mode: FollowUpMode) => void;
 }
 
 export const useSettings = create<SettingsState>()(
@@ -82,6 +87,7 @@ export const useSettings = create<SettingsState>()(
       memory: true,
       memoryAuto: true,
       showArchived: false,
+      followUp: 'queue',
       upsertEndpoint: (endpoint) => {
         const exists = get().endpoints.some((e) => e.id === endpoint.id);
         const endpoints = exists
@@ -120,6 +126,7 @@ export const useSettings = create<SettingsState>()(
       setMemory: (memory) => set({ memory }),
       setMemoryAuto: (memoryAuto) => set({ memoryAuto }),
       setShowArchived: (showArchived) => set({ showArchived }),
+      setFollowUp: (followUp) => set({ followUp }),
     }),
     {
       name: 'settings',
