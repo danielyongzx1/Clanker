@@ -23,6 +23,7 @@ import { Markdown } from './Markdown';
 import { SiteChips, SourcesButton } from './Sources';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolCall } from './ToolCall';
+import { filesOf, TurnFiles } from './TurnFiles';
 
 type Props = {
   message: Message;
@@ -253,6 +254,8 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
           0
         );
   const sources = message.status === 'done' ? sourcesOf(message.content) : [];
+  // Gathered at the end of the turn, since the calls that made them fold away with the work.
+  const made = streaming ? [] : filesOf(message.content);
 
   const render = (seg: Segment, i: number) =>
     seg.kind === 'tool' ? (
@@ -281,6 +284,7 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
         segments.map(render)
       )}
       {waiting && <ThinkingIndicator thinking expanded={false} toggleable={false} onToggle={() => {}} />}
+      {!!made.length && <TurnFiles files={made} />}
 
       {message.status === 'error' && (
         <View style={[styles.error, { backgroundColor: colors.dangerBg, borderColor: colors.danger }]}>

@@ -18,10 +18,11 @@ const ICONS: [RegExp, keyof typeof Feather.glyphMap][] = [
   [/\.(zip|gz|tgz|7z|rar|tar)$/i, 'archive'],
   [/\.(mp3|wav|ogg|m4a|flac)$/i, 'music'],
   [/\.(mp4|mov|webm|mkv)$/i, 'film'],
+  [/\.html?$/i, 'globe'],
   [/\.(js|ts|tsx|jsx|py|json|html?|css|sh|java|kt|swift|c|cpp|h|rs|go|rb|php|sql|ya?ml|xml)$/i, 'code'],
 ];
 
-const iconFor = (path: string) => ICONS.find(([re]) => re.test(path))?.[1] ?? 'file';
+export const iconFor = (path: string) => ICONS.find(([re]) => re.test(path))?.[1] ?? 'file';
 
 /**
  * The files in a workspace, newest first: tap to open, long-press (or the dots) to share or delete.
