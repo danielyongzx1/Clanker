@@ -52,7 +52,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test:remote": "node --test scripts/test-remote-*.mjs"
   },
   "private": true,
   "reanimated": {

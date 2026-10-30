@@ -1,0 +1,30 @@
+{
+  "name": "clanker-remote-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "scripts": {
+    "start": "node src/main.mjs",
+    "desktop:install": "node scripts/desktop-setup.mjs",
+    "hermes:autostart": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-hermes-startup.ps1",
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check src/server.mjs && node --check src/hermes.mjs && node --check src/harness.mjs && node --check src/harness-metrics.mjs && node --check src/desktop-discovery.mjs && node --check desktop-plugin/index.mjs && node --check scripts/desktop-setup.mjs && node --check src/run-hermes.mjs && node --check src/persistence.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-api-gateway": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-api-remotes": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-client-connection": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-scope": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-typert-registry": "0.2.1-rc.5",
+    "ws": "8.22.0"
+  },
+  "overrides": {
+    "zod": "4.6.6"
+  }
+}

@@ -1,3 +1,26 @@
+# Unreleased
+
+- Publish the standalone MIT-licensed [dsh-clanker-bridge](https://github.com/DANIE4588E/dsh-clanker-bridge) for new Harness Desktop devices, bundling the bridge and creating per-device pairing credentials without a Clanker checkout. Preserve existing checkout-based installations; document the separate dshmarket submission.
+- Add a local Harness Desktop plugin that starts/supervises its bridge and refreshes per-launch credentials while keeping saved chats bound to the same Desktop profile.
+- Add a Windows sign-in helper for the Hermes bridge using its existing persistent credentials.
+- Reconcile Harness journal snapshots periodically to recover missed completion events without repeating agent actions; retry transient Windows state-file replacement locks.
+
+- Enable DeepSeek Harness's advertised model-specific reasoning effort and defaults in the composer.
+- Display Harness context pressure, streamed generation speed and cache-hit statistics, preserving missing measurements and avoiding duplicate accounting after reconnects.
+
+- Enable per-chat Hermes reasoning effort, captured before submission and queueing.
+- Show Hermes context occupancy, native throughput and cache-hit statistics through the existing chat meters; add a backed-up Runs metrics compatibility update for Hermes 0.22.5.
+
+- Show Hermes's full authenticated model catalogue and select remote models from a searchable new-chat picker.
+- Add alternative LAN/VPN/HTTPS addresses to remote backends, with authenticated identity checks and safe receipt-based failover.
+- Add a backed-up Hermes Runs compatibility fix to forward emitted reasoning deltas while the turn is running.
+
+- Add named Hermes and DeepSeek Harness backends, selected before the first message and locked per chat.
+- Add a companion bridge with remote sessions, progress, approvals, clarification, cancellation and restart reconciliation without automatic turn replay.
+- Transfer original documents to the agent and download versioned generated/edited files, up to 20 MB per file.
+- Preserve built-in chats through migration. Remote chats use their agent's memory/history, queue follow-ups and disable regeneration and local helper requests.
+- Document remote host setup, compatible Harness client contracts, file retention and recovery.
+
 # Clanker 1.2.0-beta.1
 
 ## Suggestions that write themselves

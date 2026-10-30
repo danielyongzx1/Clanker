@@ -7,10 +7,13 @@ import type { AttachmentPart, ContentPart, Role, ToolPart } from '@/lib/provider
 import { jsonFileStorage, uid } from '@/lib/storage';
 import { chatWorkspace } from '@/lib/workspace';
 import type { Memory } from './memory';
+import type { RemoteReply, RemoteSession } from '@/lib/remote/types';
+import { removeRemoteCache } from '@/lib/remote/cache';
 
 export type MessageStatus = 'streaming' | 'done' | 'error';
 
 export interface Message {
+  remote?: RemoteReply;
   id: string;
   role: Role;
   content: ContentPart[];
@@ -68,6 +71,7 @@ export interface ContextNote {
 
 /** A message the user sent while a reply was running, waiting to go out. */
 export interface QueuedMessage {
+  remoteEffort?: string;
   id: string;
   text: string;
   attachments: AttachmentPart[];
@@ -76,6 +80,9 @@ export interface QueuedMessage {
 }
 
 export interface Conversation {
+  /** Immutable execution backend; missing on legacy chats means built-in Clanker. */
+  backendId?: string;
+  remote?: RemoteSession;
   id: string;
   title: string;
   /** True once a model-generated (or user-set) title replaced the placeholder. */
@@ -115,7 +122,8 @@ export interface Conversation {
 
 interface ChatsState {
   conversations: Record<string, Conversation>;
-  create: (endpointId: string, model: string, opts?: { memory?: false; projectId?: string }) => string;
+  create: (endpointId: string, model: string, opts?: { memory?: false; projectId?: string; backendId?: string; remote?: RemoteSession }) => string;
+  setRemote: (id: string, patch: Partial<RemoteSession>) => void;
   remove: (id: string) => void;
   rename: (id: string, title: string, titled?: boolean) => void;
   setModel: (id: string, endpointId: string, model: string) => void;
@@ -198,6 +206,8 @@ export const useChats = create<ChatsState>()(
                 updatedAt: now,
                 endpointId,
                 model,
+                backendId: opts?.backendId ?? 'local',
+                ...(opts?.remote ? { remote: opts.remote } : {}),
                 messages: [],
                 ...(opts?.memory === false ? { memory: false as const } : {}),
                 ...(opts?.projectId ? { projectId: opts.projectId } : {}),
@@ -209,6 +219,7 @@ export const useChats = create<ChatsState>()(
         remove: (id) => {
           const c = get().conversations[id];
           if (!c) return;
+          try { removeRemoteCache(id); } catch {}
           imagesOf([...c.messages, ...(c.queue ?? []).map((q) => ({ content: q.attachments }))]).forEach(deleteAttachment);
           if (!c.projectId && !c.workspace) {
             try {
@@ -223,7 +234,9 @@ export const useChats = create<ChatsState>()(
           });
         },
         rename: (id, title, titled = true) => patchConversation(id, () => ({ title, titled })),
-        setModel: (id, endpointId, model) => patchConversation(id, () => ({ endpointId, model })),
+        setModel: (id, endpointId, model) => patchConversation(id, (c) =>
+          c.backendId && c.backendId !== 'local' ? {} : { endpointId, model }),
+        setRemote: (id, patch) => patchConversation(id, (c) => ({ remote: { ...c.remote!, ...patch } })),
         setPinned: (id, pinned) => patchConversation(id, () => ({ pinnedAt: pinned ? Date.now() : undefined })),
         setArchived: (id, archived) =>
           patchConversation(id, (c) => ({
@@ -311,11 +324,12 @@ export const useChats = create<ChatsState>()(
       name: 'chats',
       storage: jsonFileStorage,
       partialize: (s) => ({ conversations: s.conversations }),
-      version: 1,
+      version: 2,
       // v0 chats all worked in one shared workspace; they keep it, while new chats get their own.
       migrate: (persisted, version) => {
         const state = persisted as Pick<ChatsState, 'conversations'>;
         if (version < 1) for (const c of Object.values(state?.conversations ?? {})) c.workspace = 'shared';
+        if (version < 2) for (const c of Object.values(state?.conversations ?? {})) c.backendId = 'local';
         return state;
       },
       // A reply, tool call or background job that was running when the app was killed can never finish,
@@ -323,12 +337,13 @@ export const useChats = create<ChatsState>()(
       merge: (persisted, current) => {
         const conversations = (persisted as Pick<ChatsState, 'conversations'>)?.conversations ?? {};
         for (const c of Object.values(conversations)) {
+          c.backendId ??= 'local';
           if (c.queue) c.queue = c.queue.map(({ steer: _, ...q }) => q);
           c.messages = c.messages.map((m) => {
             const content = m.content.map((p) =>
               p.type === 'tool' && p.background?.status === 'running' ? { ...p, background: { ...p.background, status: 'lost' as const } } : p
             );
-            return m.status === 'streaming' ? { ...m, status: 'done', content: interruptContent(content) } : { ...m, content };
+            return m.status === 'streaming' && c.backendId === 'local' ? { ...m, status: 'done', content: interruptContent(content) } : { ...m, content };
           });
         }
         return { ...current, conversations };

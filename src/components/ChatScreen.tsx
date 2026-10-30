@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { Alert, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useDerivedValue, useSharedValue } from 'react-native-reanimated';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +20,10 @@ import { useChats } from '@/store/chats';
 import { useProjects } from '@/store/projects';
 import { useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
+import { useBackends } from '@/store/backends';
+import { BackendPicker, RemoteModelPicker } from './BackendPicker';
+import { RemoteFilesButton } from './RemoteReply';
+import { refreshRemoteBackend, resumeRemoteChat } from '@/lib/remote/chat';
 
 // How far the header fade reaches past its controls into the conversation.
 const HEADER_FADE = 16;
@@ -51,6 +55,9 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
       return c
         ? {
             memory: c.memory,
+            backendId: c.backendId ?? 'local',
+            model: c.model,
+            pendingRemote: !!c.remote?.submissionId,
             projectId: c.projectId,
             empty: c.messages.length === 0,
             streaming: c.messages.some((m) => m.status === 'streaming'),
@@ -59,18 +66,24 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
     })
   );
   const active = useSettings((s) => s.active);
+  const selectedBackend = useBackends((s) => s.selected);
+  const backendId = conversation?.backendId ?? selectedBackend;
+  const remote = backendId !== 'local';
+  const backendName = useBackends((s) => s.remotes.find((b) => b.id === backendId)?.name ?? (backendId === 'local' ? 'Clanker' : 'Remote backend'));
+  const remoteModel = useBackends((s) => s.remotes.find((b) => b.id === backendId)?.model);
   const hasEndpoint = useSettings((s) => s.endpoints.some((e) => e.models.length > 0));
   const showUsage = useSettings((s) => s.contextUsage);
   const usage = useContextUsage(currentId, showUsage);
   const memorySetting = useSettings((s) => s.memory);
   const newChatMemoryOff = useUI((s) => s.newChatMemoryOff);
-  const memoryOff = memorySetting && (conversation ? conversation.memory === false : newChatMemoryOff);
+  const memoryOff = !remote && memorySetting && (conversation ? conversation.memory === false : newChatMemoryOff);
   const newChatProjectId = useUI((s) => s.newChatProjectId);
   const projectId = conversation ? conversation.projectId : newChatProjectId;
   const projectName = useProjects((s) => (projectId ? s.projects[projectId]?.name : undefined));
 
   const [draft, setDraft] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [backendPickerOpen, setBackendPickerOpen] = useState(false);
   // The conversation runs under the floating header and composer; these are their measured
   // heights (fade included) so content can rest clear of them. The composer's is measured
   // collapsed, and its growth while expanding is added on the UI thread: measuring it every
@@ -84,12 +97,22 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
   );
   const emptyInsetStyle = useAnimatedStyle(() => ({ paddingBottom: bottomInset.value }));
 
-  const streaming = !!conversation?.streaming;
+  const streaming = !!conversation?.streaming || !!conversation?.pendingRemote;
+  useEffect(() => {
+    if (!remote) return;
+    void refreshRemoteBackend(backendId).catch(() => {});
+  }, [backendId, remote]);
+  useEffect(() => {
+    if (!currentId || !remote) return;
+    void resumeRemoteChat(currentId);
+    const listener = AppState.addEventListener('change', (state) => { if (state === 'active') void resumeRemoteChat(currentId); });
+    return () => listener.remove();
+  }, [currentId, remote]);
 
   // Reopening a chat switches back to the model it was using, as ChatGPT does.
   useEffect(() => {
     const conversation = currentId ? useChats.getState().conversations[currentId] : undefined;
-    if (!conversation) return;
+    if (!conversation || (conversation.backendId && conversation.backendId !== 'local')) return;
     const { endpoints, setActive } = useSettings.getState();
     const endpoint = endpoints.find((e) => e.id === conversation.endpointId);
     if (endpoint?.models.includes(conversation.model)) {
@@ -129,18 +152,19 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
           {currentId && conversation && !conversation.empty ? (
             <MessageList
               conversationId={currentId}
-              onRegenerate={onRegenerate}
+              onRegenerate={remote ? undefined : onRegenerate}
               topInset={topInset}
               bottomInset={bottomInset}
             />
           ) : (
             <Animated.View style={[styles.container, { paddingTop: topInset }, emptyInsetStyle]}>
               <EmptyState
-                hasEndpoint={hasEndpoint}
+                hasEndpoint={remote ? !!remoteModel : hasEndpoint}
+                remote={remote}
                 memoryOff={memoryOff}
                 project={projectName}
                 onSuggestion={setDraft}
-                onAddEndpoint={() => router.push('/settings/endpoint')}
+                onAddEndpoint={() => router.push(remote ? '/settings/backends' : '/settings/endpoint')}
               />
             </Animated.View>
           )}
@@ -166,10 +190,10 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
       >
         <EdgeFade solid="top" style={StyleSheet.absoluteFill} />
         <ChatHeader
-          title={active?.model ?? 'Clanker'}
+          title={remote ? (conversation?.model ?? remoteModel ?? backendName) : active?.model ?? 'Clanker'}
           onMenu={onMenu}
           onBack={onBack}
-          onTitle={() => setPickerOpen(true)}
+          onTitle={remote ? (!conversation || conversation.empty ? () => setPickerOpen(true) : undefined) : () => setPickerOpen(true)}
           onNewChat={
             currentId
               ? () => (conversation?.projectId ? useUI.getState().openNewInProject(conversation.projectId) : open(null))
@@ -177,12 +201,19 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
           }
           memoryOff={memoryOff}
           onToggleMemory={
-            !currentId && memorySetting ? () => useUI.getState().setNewChatMemoryOff(!newChatMemoryOff) : undefined
+            !currentId && memorySetting && !remote ? () => useUI.getState().setNewChatMemoryOff(!newChatMemoryOff) : undefined
           }
         />
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 }}>
+          {conversation && !conversation.empty ? <Text style={{ color: colors.textSecondary, fontSize: 13 }}>{backendName}</Text> :
+            <Pressable onPress={() => setBackendPickerOpen(true)} accessibilityRole="button" accessibilityLabel="Choose backend" style={{ padding: 8 }}><Text style={{ color: colors.link }}>{backendName} · Choose backend</Text></Pressable>}
+          {remote && currentId && <RemoteFilesButton chatId={currentId} />}
+        </View>
       </View>
 
-      <ModelPicker visible={pickerOpen} onClose={() => setPickerOpen(false)} onManage={() => router.push('/settings')} />
+      {remote ? <RemoteModelPicker backendId={backendId} visible={pickerOpen} onClose={() => setPickerOpen(false)} /> :
+        <ModelPicker visible={pickerOpen} onClose={() => setPickerOpen(false)} onManage={() => router.push('/settings')} />}
+      <BackendPicker visible={backendPickerOpen} onClose={() => setBackendPickerOpen(false)} onManage={() => router.push('/settings/backends')} />
     </View>
   );
 }

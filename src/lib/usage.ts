@@ -3,12 +3,13 @@ import { useChats, type Conversation } from '@/store/chats';
 import { useMemory } from '@/store/memory';
 import { resolveBudget, useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
+import { useBackends } from '@/store/backends';
 import { historyOf, tokensOf, unitsOf, visibleTokens } from './context';
 import { availableTools } from './tools';
 import { systemPrompt } from './tools/prompt';
 
 /** Estimated tokens the next request would send, by part, against the model's budget. */
-export type ContextUsage = { system: number; tools: number; messages: number; budget: number };
+export type ContextUsage = { system: number; tools: number; messages: number; budget: number; remote?: boolean; estimated?: boolean };
 
 const STREAM_REFRESH_MS = 1000;
 
@@ -42,7 +43,7 @@ function useThrottledConversation(id: string | null) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-  return conversation;
+  return conversation?.id === id ? conversation : undefined;
 }
 
 /**
@@ -58,6 +59,9 @@ export function useContextUsage(conversationId: string | null, enabled: boolean)
   const memories = useMemory((s) => s.memories);
   const newChatMemoryOff = useUI((s) => s.newChatMemoryOff);
   const conversation = useThrottledConversation(conversationId);
+  const selectedBackend = useBackends((s) => s.selected);
+  const backendId = useChats((s) => conversationId ? s.conversations[conversationId]?.backendId ?? 'local' : selectedBackend);
+  const remote = backendId !== 'local';
   const budget = endpoint && model ? resolveBudget(endpoint, model) : null;
 
   const replyId = conversation?.messages.find((m) => m.status === 'streaming')?.id;
@@ -65,19 +69,23 @@ export function useContextUsage(conversationId: string | null, enabled: boolean)
   // Refreshed when a message starts or a reply ends (the web and shell tools can come and go),
   // not on every streamed token.
   const overhead = useMemo(() => {
-    if (!enabled || !budget) return { system: 0, tools: 0 };
+    if (!enabled || remote || !budget) return { system: 0, tools: 0 };
     const tools = withTools ? availableTools(conversationId) : [];
     return {
       system: tokensOf(systemPrompt(conversationId, tools.length > 0) ?? ''),
       tools: tools.length ? tokensOf(JSON.stringify(tools)) : 0,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, budget, withTools, disabledTools, memory, memories, newChatMemoryOff, conversationId, replyId, count]);
+  }, [enabled, remote, budget, withTools, disabledTools, memory, memories, newChatMemoryOff, conversationId, replyId, count]);
 
   const messages = useMemo(() => {
-    if (!enabled || !conversation) return 0;
+    if (!enabled || remote || !conversation) return 0;
     return visibleTokens(unitsOf(historyOf(conversation, replyId)), conversation.compressions ?? []);
-  }, [enabled, conversation, replyId]);
+  }, [enabled, remote, conversation, replyId]);
 
+  if (remote) {
+    const context = conversation?.remote?.context;
+    return enabled && context?.budget ? { system: 0, tools: 0, messages: context.used, budget: context.budget, estimated: context.estimated, remote: true } : null;
+  }
   return enabled && budget ? { ...overhead, messages, budget } : null;
 }

@@ -12,6 +12,7 @@ import { formatStats } from '@/lib/stats';
 import { useTheme } from '@/lib/theme';
 import { messageText, type Message } from '@/store/chats';
 import { useSettings } from '@/store/settings';
+import { RemoteReply } from './RemoteReply';
 import { Markdown } from './Markdown';
 import { NestedScroll } from './NestedScroll';
 import { SiteChips, SourcesButton } from './Sources';
@@ -20,9 +21,10 @@ import { ToolCall } from './ToolCall';
 import { filesOf, TurnFiles } from './TurnFiles';
 
 type Props = {
+  conversationId: string;
   message: Message;
   isLast: boolean;
-  onRegenerate: (messageId: string) => void;
+  onRegenerate?: (messageId: string) => void;
 };
 
 function Files({ files, align }: { files: FilePart[]; align: 'flex-end' | 'flex-start' }) {
@@ -185,7 +187,7 @@ function Thoughts({ text, ms, live }: { text: string; ms?: number; live: boolean
   );
 }
 
-function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
+function MessageBubbleInner({ conversationId, message, isLast, onRegenerate }: Props) {
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
   const showSpeed = useSettings((s) => s.decodeSpeed);
@@ -268,18 +270,20 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
       )}
       {waiting && <ThinkingIndicator thinking expanded={false} toggleable={false} onToggle={() => {}} />}
       {!!made.length && <TurnFiles files={made} />}
+      {!onRegenerate && <RemoteReply chatId={conversationId} reply={message.remote} reconnect={!!message.error} />}
+      {message.error && message.status !== 'error' && <Text style={{ color: colors.textSecondary }}>{message.error}</Text>}
 
       {message.status === 'error' && (
         <View style={[styles.error, { backgroundColor: colors.dangerBg, borderColor: colors.danger }]}>
           <Text style={{ color: colors.danger, fontSize: 14, lineHeight: 20 }}>{message.error}</Text>
-          <Pressable
+          {onRegenerate && <Pressable
             onPress={() => onRegenerate(message.id)}
             style={[styles.retry, { borderColor: colors.danger }]}
             hitSlop={6}
           >
             <Feather name="rotate-ccw" size={14} color={colors.danger} />
             <Text style={{ color: colors.danger, fontWeight: '500' }}>Retry</Text>
-          </Pressable>
+          </Pressable>}
         </View>
       )}
 
@@ -290,7 +294,7 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
               <Feather name={copied ? 'check' : 'copy'} size={16} color={colors.textSecondary} />
             </Pressable>
           )}
-          {isLast && (
+          {isLast && onRegenerate && (
             <Pressable onPress={() => onRegenerate(message.id)} hitSlop={8} style={styles.action}>
               <Feather name="refresh-cw" size={16} color={colors.textSecondary} />
             </Pressable>

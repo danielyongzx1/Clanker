@@ -6,6 +6,7 @@ import { useTheme } from '@/lib/theme';
 const SUGGESTION_COLORS = ['#4C8DF6', '#EA4335', '#34A853', '#F4B400'];
 
 type Props = {
+  remote?: boolean;
   hasEndpoint: boolean;
   onSuggestion: (text: string) => void;
   onAddEndpoint: () => void;
@@ -15,7 +16,7 @@ type Props = {
   project?: string;
 };
 
-export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff, project }: Props) {
+export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff, project, remote }: Props) {
   const { colors } = useTheme();
   const { suggestions, loading, error } = useSuggestions(project, memoryOff);
 
@@ -39,12 +40,13 @@ export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff
             {project}
           </Text>
           <Text style={[styles.temporaryText, { color: colors.textTertiary }]}>
-            {memoryOff
+            {remote ? 'New remote chat in this project. Its instructions are sent to the backend; files and memory are managed on the remote device.' : memoryOff
               ? "A temporary chat in this project: it shares the project's files and instructions, but won't use or save memories."
               : "New chat in this project. It shares the project's files, sources and instructions."}
           </Text>
         </View>
       )}
+      {remote && !project && <View style={styles.temporary}><Feather name="server" size={22} color={colors.textSecondary} /><Text style={[styles.temporaryTitle, { color: colors.text }]}>Remote chat</Text><Text style={[styles.temporaryText, { color: colors.textTertiary }]}>Tools and files run on your remote device. This chat keeps its backend after the first message.</Text></View>}
       {memoryOff && !project && (
         <View style={styles.temporary}>
           <Feather name="eye-off" size={22} color={colors.textSecondary} />

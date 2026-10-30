@@ -11,7 +11,7 @@ export const MAX_EDGE = 1568;
 // Inline text cap for picked documents; beyond it the model gets the head plus a truncation note.
 const MAX_TEXT_CHARS = 80_000;
 // Binary files above this are rejected rather than ballooned to base64 into a request body.
-const MAX_FILE_BYTES = 20 * 1024 * 1024;
+export const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
 const dir = new Directory(Paths.document, 'attachments');
 
@@ -141,6 +141,7 @@ export async function pickFiles(): Promise<(FilePart | ImagePart)[]> {
     result.assets.map(async (asset): Promise<FilePart | ImagePart> => {
       const name = asset.name || 'file';
       const mimeType = asset.mimeType || 'application/octet-stream';
+      if (asset.size && asset.size > MAX_FILE_BYTES) throw new Error(`"${name}" is larger than 20 MB.`);
 
       if (mimeType.startsWith('image/')) {
         return importAsset({ uri: asset.uri });
@@ -150,13 +151,14 @@ export async function pickFiles(): Promise<(FilePart | ImagePart)[]> {
         try {
           let text = await new File(asset.uri).text();
           // The inline copy can be truncated, so keep the original for the agent's workspace.
-          let file: string | undefined;
+          const file = storedName(name);
+          await storeFrom(asset.uri, file);
+          if (new File(dir, file).size > MAX_FILE_BYTES) {
+            deleteAttachment(file);
+            throw new Error(`"${name}" is larger than 20 MB.`);
+          }
           if (text.length > MAX_TEXT_CHARS) {
             text = text.slice(0, MAX_TEXT_CHARS) + '\n[…truncated]';
-            if (!asset.size || asset.size <= MAX_FILE_BYTES) {
-              file = storedName(name);
-              await storeFrom(asset.uri, file);
-            }
           }
           return { type: 'file', name, mimeType, text, size: asset.size, ...(file ? { file } : {}) };
         } catch {
@@ -169,6 +171,10 @@ export async function pickFiles(): Promise<(FilePart | ImagePart)[]> {
       }
       const stored = storedName(name);
       await storeFrom(asset.uri, stored);
+      if (new File(dir, stored).size > MAX_FILE_BYTES) {
+        deleteAttachment(stored);
+        throw new Error(`"${name}" is larger than 20 MB.`);
+      }
       return { type: 'file', file: stored, name, mimeType, size: asset.size };
     })
   );

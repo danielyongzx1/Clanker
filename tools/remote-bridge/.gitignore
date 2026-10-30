@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.harness
+bridge.config.json
+bridge.harness.json
+.clanker-bridge/
+.clanker-harness/
+__pycache__/
+workspaces/
+harness-workspaces/
+desktop-plugin/local.config.json
+hermes-startup.json
+*.tgz

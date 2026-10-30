@@ -76,6 +76,7 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={styles.content}>
+      <Section><Row icon="server" title="Backends" detail="Clanker, Hermes and DeepSeek Harness" onPress={() => router.push('/settings/backends')} /></Section>
       <Section title="Models" footer="Connect any OpenAI-compatible, Anthropic, Ollama or Gemini API. Keys stay in the device keychain.">
         {endpoints.map((e) => (
           <Row
@@ -147,21 +148,21 @@ export default function SettingsScreen() {
         <ToggleRow
           icon="bar-chart-2"
           title="Context meter"
-          detail="Show how much of the model's context a chat uses while you type"
+          detail="Show how much of the model's context a chat uses"
           value={contextUsage}
           onValueChange={setContextUsage}
         />
         <ToggleRow
           icon="zap"
           title="Decode speed"
-          detail="Show tokens per second under replies, averaged over the last 10 steps"
+          detail="Show tokens per second under replies"
           value={decodeSpeed}
           onValueChange={setDecodeSpeed}
         />
         <ToggleRow
           icon="database"
           title="Cache hits"
-          detail="Show how much of the prompt the server had cached over the last 10 steps"
+          detail="Show how much of the prompt the backend had cached"
           value={cacheHits}
           onValueChange={setCacheHits}
         />

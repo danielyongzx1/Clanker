@@ -9,7 +9,7 @@ type Props = {
   onMenu?: () => void;
   /** Given on a project's chat: a back button to the project in place of the sidebar button. */
   onBack?: () => void;
-  onTitle: () => void;
+  onTitle?: () => void;
   onNewChat?: () => void;
   /** Memory is off for this chat (or the one about to be started). */
   memoryOff?: boolean;
@@ -54,7 +54,8 @@ export function ChatHeader({ title, onMenu, onBack, onTitle, onNewChat, memoryOf
       <View pointerEvents="box-none" style={styles.center}>
         <Pressable
           onPress={onTitle}
-          accessibilityLabel="Choose model"
+          disabled={!onTitle}
+          accessibilityLabel={onTitle ? 'Choose model' : title}
           style={({ pressed }) => [
             styles.track,
             { backgroundColor: colors.segmentTrack },
@@ -67,9 +68,9 @@ export function ChatHeader({ title, onMenu, onBack, onTitle, onNewChat, memoryOf
               {title}
             </Text>
           </View>
-          <View style={styles.chevron}>
+          {onTitle && <View style={styles.chevron}>
             <Feather name="chevron-down" size={18} color={colors.textSecondary} />
-          </View>
+          </View>}
         </Pressable>
       </View>
 

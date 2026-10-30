@@ -66,6 +66,7 @@ export default function RootLayout() {
             <Stack screenOptions={{ headerShadowVisible: false, headerBackButtonDisplayMode: 'minimal', freezeOnBlur: true }}>
               <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
               <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
+              <Stack.Screen name="settings/backends" options={{ title: 'Backends' }} />
               <Stack.Screen name="settings/endpoint" options={{ presentation: 'modal', title: 'Endpoint' }} />
               <Stack.Screen name="settings/workspace" options={{ title: 'Workspace files' }} />
               <Stack.Screen name="settings/tools" options={{ title: 'Files & code' }} />

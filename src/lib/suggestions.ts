@@ -7,6 +7,7 @@ import { useProjects, type Project } from '@/store/projects';
 import { useSettings } from '@/store/settings';
 import { SUGGESTION_INTERVAL, useSuggestionCache } from '@/store/suggestions';
 import { useUI } from '@/store/ui';
+import { useBackends } from '@/store/backends';
 import { getAdapter, type Endpoint } from './providers';
 import { apiKeys } from './storage';
 
@@ -125,7 +126,8 @@ export async function generateSuggestions(
 
 /** Reuses persisted results and shares one generation allowance across every screen and model. */
 export function useSuggestions(project?: string, memoryOff?: boolean) {
-  const enabled = useSettings((s) => s.suggestions);
+  const suggestionsEnabled = useSettings((s) => s.suggestions);
+  const selectedBackend = useBackends((s) => s.selected);
   const endpoint = useSettings((s) => s.endpoints.find((e) => e.id === s.active?.endpointId));
   const model = useSettings((s) => s.active?.model);
   const memoryEnabled = useSettings((s) => s.memory);
@@ -134,6 +136,7 @@ export function useSuggestions(project?: string, memoryOff?: boolean) {
   const projects = useProjects((s) => s.projects);
   const conversations = useChatList();
   const current = currentId ? conversations[currentId] : undefined;
+  const enabled = suggestionsEnabled && (current?.backendId ?? selectedBackend) === 'local';
   const projectId = (current ? current.projectId : newChatProjectId) ?? null;
   const historyEnabled = memoryEnabled && !memoryOff && current?.memory !== false;
   const scope = JSON.stringify([projectId, projectId ? projects[projectId]?.memory : null, historyEnabled]);

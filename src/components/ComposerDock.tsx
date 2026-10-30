@@ -13,6 +13,8 @@ import { useTheme } from '@/lib/theme';
 import type { ContextUsage } from '@/lib/usage';
 import { useChats } from '@/store/chats';
 import { resolveEffort, useSettings } from '@/store/settings';
+import { useBackends } from '@/store/backends';
+import { resolveRemoteEffort } from '@/lib/remote/effort';
 import { useUI } from '@/store/ui';
 import { Composer, composerGrowth } from './Composer';
 import { EdgeFade } from './EdgeFade';
@@ -76,10 +78,25 @@ export function ComposerDock({
   const [attachments, setAttachments] = useState<AttachmentPart[]>([]);
   const input = useRef<TextInputInstance>(null);
   const queue = useChats((s) => (conversationId ? s.conversations[conversationId]?.queue : undefined));
-  const followUp = useSettings((s) => s.followUp);
+  const selectedBackend = useBackends((s) => s.selected);
+  const backendId = useChats((s) => conversationId ? s.conversations[conversationId]?.backendId ?? 'local' : selectedBackend);
+  const remote = backendId !== 'local';
+  const followUpSetting = useSettings((s) => s.followUp);
+  const followUp = remote ? 'queue' : followUpSetting;
   const insets = useSafeAreaInsets();
   const active = useSettings((s) => s.active);
-  const effort = useSettings(useShallow((s) => resolveEffort(s, s.active)));
+  const localEffort = useSettings(useShallow((s) => remote ? null : resolveEffort(s, s.active)));
+  const backend = useBackends((s) => s.remotes.find((b) => b.id === backendId));
+  const remoteChoice = useChats(useShallow((s) => {
+    const chat = conversationId ? s.conversations[conversationId] : undefined;
+    return { model: chat?.model, effort: chat?.remote?.effort };
+  }));
+  const effort = remote ? resolveRemoteEffort(backend, remoteChoice.model ?? backend?.model, remoteChoice.effort) : localEffort;
+  const changeEffort = (level: string) => {
+    if (!remote) { if (active) useSettings.getState().setEffort(active, level); return; }
+    if (conversationId) useChats.getState().setRemote(conversationId, { effort: level });
+    else if (backend) useBackends.getState().save({ ...backend, efforts: { ...backend.efforts, [backend.model]: level } });
+  };
   const effortOpen = useUI((s) => s.effortOpen);
   const setEffortOpen = useUI((s) => s.setEffortOpen);
   // Screens under the one on top keep their dock mounted; only the visible one shows the slider.
@@ -171,6 +188,7 @@ export function ComposerDock({
               onEdit={editQueued}
               onDelete={(id) => deleteQueued(conversationId, id)}
               onSendNow={sendNow}
+              allowSteer={!remote}
             />
           ) : null}
           <Composer
@@ -219,7 +237,7 @@ export function ComposerDock({
                 <EffortSlider
                   levels={effort.levels}
                   value={effort.level}
-                  onChange={(level) => active && useSettings.getState().setEffort(active, level)}
+                  onChange={changeEffort}
                 />
               </View>
               {/* Over the keyboard the veil keeps going as a gradient — solid just below the

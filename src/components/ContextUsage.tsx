@@ -17,6 +17,7 @@ const CARD_WIDTH = 320;
 const totalOf = (u: ContextUsage) => u.system + u.tools + u.messages;
 
 function parts(u: ContextUsage, colors: Colors) {
+  if (u.remote) return [{ label: 'Context held by backend', tokens: totalOf(u), color: colors.accent }];
   return [
     { label: 'System prompt', tokens: u.system, color: colors.textTertiary },
     { label: 'Tool definitions', tokens: u.tools, color: TOOLS_COLOR },
@@ -29,13 +30,14 @@ export function ContextMeter({ usage }: { usage: ContextUsage }) {
   const { colors } = useTheme();
   const warnPercent = useSettings((s) => s.compression.trigger);
   const frac = totalOf(usage) / usage.budget;
+  const threshold = usage.remote ? 90 : warnPercent;
   return (
     <View style={styles.meter}>
       <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.textTertiary, opacity: 0.3 }]} />
       <View
         style={[
           styles.meterFill,
-          { height: `${Math.min(1, frac) * 100}%`, backgroundColor: frac * 100 >= warnPercent ? colors.danger : colors.accent },
+          { height: `${Math.min(1, frac) * 100}%`, backgroundColor: frac * 100 >= threshold ? colors.danger : colors.accent },
         ]}
       />
     </View>
@@ -101,6 +103,8 @@ export function ContextPopover({ visible, usage, right, bottom, onClose }: Popov
   if (!mounted) return null;
   const total = totalOf(usage);
   const percent = Math.round((total / usage.budget) * 100);
+  const threshold = usage.remote ? 90 : warnPercent;
+  const prefix = usage.estimated === false ? '' : '~';
   // Over budget, the bar shows each part's share of the total instead.
   const scale = Math.max(total, usage.budget);
   const width = Math.min(CARD_WIDTH, Dimensions.get('window').width - 24);
@@ -120,13 +124,13 @@ export function ContextPopover({ visible, usage, right, bottom, onClose }: Popov
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.header}>
             <Text style={[styles.headerText, { color: colors.textSecondary }]}>
-              <Text style={{ color: percent >= warnPercent ? colors.danger : colors.text, fontWeight: '700' }}>
+              <Text style={{ color: percent >= threshold ? colors.danger : colors.text, fontWeight: '700' }}>
                 {percent}%
               </Text>
               {'  '}of context used
             </Text>
             <Text style={[styles.headerText, { color: colors.text, fontWeight: '600' }]}>
-              ~{formatTokens(total)} / {formatTokens(usage.budget)}
+              {prefix}{formatTokens(total)} / {formatTokens(usage.budget)}
             </Text>
           </View>
 
@@ -145,13 +149,14 @@ export function ContextPopover({ visible, usage, right, bottom, onClose }: Popov
             <View key={p.label} style={styles.row}>
               <View style={[styles.swatch, { backgroundColor: p.color }]} />
               <Text style={[styles.rowLabel, { color: colors.text }]}>{p.label}</Text>
-              <Text style={[styles.rowValue, { color: colors.text }]}>~{formatTokens(p.tokens)}</Text>
+              <Text style={[styles.rowValue, { color: colors.text }]}>{prefix}{formatTokens(p.tokens)}</Text>
             </View>
           ))}
 
           <Text style={[styles.note, { color: colors.textTertiary }]}>
-            Rough estimate against this model&apos;s budget. Past {warnPercent}%, older history is compressed
-            automatically.
+            {usage.remote
+              ? `${usage.estimated ? 'Estimated by' : 'Reported by'} the remote backend. History and compression are managed on the host.`
+              : `Rough estimate against this model's budget. Past ${warnPercent}%, older history is compressed automatically.`}
           </Text>
         </View>
       </Animated.View>

@@ -13,6 +13,7 @@ import { apiKeys, uid } from './storage';
 import { availableTools, executeTool } from './tools';
 import { endPhoneRun, onPhoneStop } from './tools/phone';
 import { markObserved } from './tools/observe';
+import { isRemoteChat, remoteEffortForChat, sendRemoteMessage, sendRemoteQueue, stopRemoteChat } from './remote/chat';
 import { systemPrompt, writeContextNote } from './tools/prompt';
 
 const controllers = new Map<string, AbortController>();
@@ -69,6 +70,7 @@ function postUserMessage(id: string, text: string, attachments: AttachmentPart[]
 
 /** Starts a new conversation (when `conversationId` is null) or continues one, and streams the reply. */
 export function sendMessage(conversationId: string | null, text: string, attachments: AttachmentPart[]) {
+  if (isRemoteChat(conversationId)) return sendRemoteMessage(conversationId, text, attachments);
   const { active } = useSettings.getState();
   if (!active) throw new Error('Add an endpoint in Settings to start chatting.');
   const chats = useChats.getState();
@@ -90,6 +92,7 @@ export function sendMessage(conversationId: string | null, text: string, attachm
 
 /** Drops `messageId` (an assistant reply) and everything after it, then asks the model again. */
 export function regenerate(conversationId: string, messageId: string) {
+  if (isRemoteChat(conversationId)) return;
   const { active } = useSettings.getState();
   const chats = useChats.getState();
   if (active) chats.setModel(conversationId, active.endpointId, active.model);
@@ -98,6 +101,7 @@ export function regenerate(conversationId: string, messageId: string) {
 }
 
 export function stopStreaming(conversationId: string) {
+  if (isRemoteChat(conversationId)) return stopRemoteChat(conversationId);
   controllers.get(conversationId)?.abort();
 }
 
@@ -111,6 +115,12 @@ const queueOf = (conversationId: string) => useChats.getState().conversations[co
  * Settings choose, to steer the reply at its next step.
  */
 export function submitMessage(conversationId: string | null, text: string, attachments: AttachmentPart[]) {
+  if (conversationId && isRemoteChat(conversationId)) {
+    const chat = useChats.getState().conversations[conversationId];
+    if (!chat?.remote?.submissionId) return sendRemoteMessage(conversationId, text, attachments);
+    useChats.getState().setQueue(conversationId, [...(chat.queue ?? []), { id: uid(), text, attachments, remoteEffort: remoteEffortForChat(conversationId) }]);
+    return conversationId;
+  }
   if (!conversationId || !controllers.has(conversationId)) return sendMessage(conversationId, text, attachments);
   const message: QueuedMessage = { id: uid(), text, attachments };
   if (useSettings.getState().followUp === 'steer') message.steer = true;
@@ -134,6 +144,7 @@ function sendFromQueue(conversationId: string, queuedId?: string) {
 
 /** Steers the running reply with a queued message, or sends it right away when nothing is running. */
 export function sendQueuedNow(conversationId: string, queuedId: string) {
+  if (isRemoteChat(conversationId)) return sendRemoteQueue(conversationId, queuedId);
   if (!controllers.has(conversationId)) return sendFromQueue(conversationId, queuedId);
   useChats
     .getState()

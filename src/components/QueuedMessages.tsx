@@ -14,6 +14,7 @@ const INSET = 12;
 const MAX_ROWS = 4;
 
 type Props = {
+  allowSteer?: boolean;
   messages: QueuedMessage[];
   /** Whether a reply is running: sending one now steers it rather than starting a turn. */
   streaming: boolean;
@@ -32,7 +33,7 @@ function summary(message: QueuedMessage) {
 }
 
 /** Messages sent while a reply runs, stacked above the composer until they go out. */
-export function QueuedMessages({ messages, streaming, progress, onEdit, onDelete, onSendNow }: Props) {
+export function QueuedMessages({ messages, streaming, progress, onEdit, onDelete, onSendNow, allowSteer = true }: Props) {
   const { colors } = useTheme();
   const cardStyle = useAnimatedStyle(() => ({ marginHorizontal: composerMargin(progress.value) + INSET }));
 
@@ -67,7 +68,7 @@ export function QueuedMessages({ messages, streaming, progress, onEdit, onDelete
             {m.steer && <Text style={[styles.tag, { color: colors.accentText }]}>Steering</Text>}
             <Action icon="edit" label="Edit queued message" onPress={press(onEdit, m.id)} />
             <Action icon="trash-2" label="Delete queued message" onPress={press(onDelete, m.id)} />
-            {!m.steer && (
+            {!m.steer && (!streaming || allowSteer) && (
               <Action
                 icon="arrow-up"
                 label={streaming ? 'Steer the reply with this message now' : 'Send this message now'}
