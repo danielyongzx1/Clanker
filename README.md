@@ -13,6 +13,8 @@ Supported API formats:
 
 Features: streaming replies with stop/regenerate, markdown with syntax-highlighted code blocks, image attachments for vision models, chat history drawer with search/rename/delete, model picker across all endpoints, auto-generated titles, light/dark/system theme. API keys live in the device keychain (`expo-secure-store`); chats and images are stored as files in the app's document directory.
 
+**Suggested prompts.** Opening a new chat automatically asks the selected model for four conversation starters based on recent chats. The request includes titles and up to three short message excerpts from each of the five most recently updated chats; it excludes temporary and archived chats, attachments, tool output and thinking. Project chats draw suggestions from that project's chats; general chats exclude projects with project-only memory. With memory off or in a temporary chat, suggestions use no chat history. Each row shows a short summary and a matching icon chosen by the model from the bundled icon set; an unsupported icon falls back to a chat bubble. Tapping a row puts the full prompt in the composer so you can edit and send it. Suggestions refresh when you change models, projects or eligible recent chat excerpts. This is a separate, tool-free request to your configured endpoint, cancelled when you leave the empty chat. If generation fails or takes longer than 20 seconds, tap the retry row; you can keep typing and sending normally.
+
 ## Agent tools
 
 With **Settings → File & code tools** on (the default), models get tools that work on a private workspace folder on the phone. Each chat has its own workspace; chats in a project share the project's (chats from before workspaces were per chat keep the one folder they all shared):

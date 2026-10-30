@@ -1,14 +1,9 @@
 import Feather from '@expo/vector-icons/Feather';
-import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSuggestions } from '@/lib/suggestions';
 import { useTheme } from '@/lib/theme';
 
-const SUGGESTIONS: { icon: ComponentProps<typeof Feather>['name']; tint: string; text: string }[] = [
-  { icon: 'cpu', tint: '#4C8DF6', text: 'Explain how transformers work, simply' },
-  { icon: 'mail', tint: '#EA4335', text: 'Write a polite follow-up email' },
-  { icon: 'map-pin', tint: '#34A853', text: 'Plan a 3-day trip to Kyoto' },
-  { icon: 'code', tint: '#F4B400', text: 'Debug a React useEffect loop' },
-];
+const SUGGESTION_COLORS = ['#4C8DF6', '#EA4335', '#34A853', '#F4B400'];
 
 type Props = {
   hasEndpoint: boolean;
@@ -22,6 +17,7 @@ type Props = {
 
 export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff, project }: Props) {
   const { colors } = useTheme();
+  const { suggestions, loading, error, retry } = useSuggestions(project, memoryOff);
 
   if (!hasEndpoint) {
     return (
@@ -58,15 +54,27 @@ export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff
           </Text>
         </View>
       )}
-      {SUGGESTIONS.map((s) => (
+      {loading && (
+        <Text style={[styles.status, styles.loading, { color: colors.textTertiary }]}>Generating suggestions…</Text>
+      )}
+      {error && (
+        <Pressable onPress={retry} accessibilityRole="button" style={styles.row}>
+          <Feather name="refresh-cw" size={22} color={colors.textSecondary} />
+          <Text style={[styles.status, { color: colors.textSecondary }]}>Suggestions unavailable. Tap to retry.</Text>
+        </Pressable>
+      )}
+      {suggestions.map((s, index) => (
         <Pressable
-          key={s.text}
-          onPress={() => onSuggestion(s.text)}
+          key={s.summary}
+          onPress={() => onSuggestion(s.prompt)}
+          accessibilityRole="button"
+          accessibilityLabel={s.summary}
+          accessibilityHint="Adds the full prompt to your message for editing"
           style={({ pressed }) => [styles.row, pressed && { opacity: 0.5 }]}
         >
-          <Feather name={s.icon} size={22} color={s.tint} />
+          <Feather name={s.icon} size={22} color={SUGGESTION_COLORS[index]} />
           <Text numberOfLines={1} style={[styles.rowText, { color: colors.text }]}>
-            {s.text}
+            {s.summary}
           </Text>
         </Pressable>
       ))}
@@ -82,6 +90,8 @@ const styles = StyleSheet.create({
   ctaText: { fontSize: 15, fontWeight: '600' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 18, paddingVertical: 14 },
   rowText: { fontSize: 17, flexShrink: 1 },
+  status: { fontSize: 14, flexShrink: 1 },
+  loading: { paddingVertical: 14 },
   temporary: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 },
   temporaryTitle: { fontSize: 20, fontWeight: '600' },
   temporaryText: { fontSize: 15, lineHeight: 21, textAlign: 'center' },
