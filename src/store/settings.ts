@@ -57,6 +57,8 @@ interface SettingsState {
   showArchived: boolean;
   /** Whether a short request after the first reply names the chat. */
   titleGeneration: boolean;
+  /** Whether new chats show automatically generated prompt suggestions. */
+  suggestions: boolean;
   followUp: FollowUpMode;
   upsertEndpoint: (endpoint: Endpoint) => void;
   removeEndpoint: (id: string) => void;
@@ -76,6 +78,7 @@ interface SettingsState {
   setMemoryAuto: (on: boolean) => void;
   setShowArchived: (on: boolean) => void;
   setTitleGeneration: (on: boolean) => void;
+  setSuggestions: (on: boolean) => void;
   setFollowUp: (mode: FollowUpMode) => void;
 }
 
@@ -99,6 +102,7 @@ export const useSettings = create<SettingsState>()(
       memoryAuto: true,
       showArchived: false,
       titleGeneration: true,
+      suggestions: true,
       followUp: 'queue',
       upsertEndpoint: (endpoint) => {
         const exists = get().endpoints.some((e) => e.id === endpoint.id);
@@ -141,6 +145,7 @@ export const useSettings = create<SettingsState>()(
       setMemoryAuto: (memoryAuto) => set({ memoryAuto }),
       setShowArchived: (showArchived) => set({ showArchived }),
       setTitleGeneration: (titleGeneration) => set({ titleGeneration }),
+      setSuggestions: (suggestions) => set({ suggestions }),
       setFollowUp: (followUp) => set({ followUp }),
     }),
     {

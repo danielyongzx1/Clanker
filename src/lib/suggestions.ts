@@ -1,9 +1,11 @@
 import type Feather from '@expo/vector-icons/Feather';
 import type { ComponentProps } from 'react';
-import { useEffect, useMemo, useState } from 'react';
-import { messageText, useChats, type Conversation } from '@/store/chats';
+import { useEffect } from 'react';
+import { AppState } from 'react-native';
+import { messageText, useChatList, useChats, type Conversation } from '@/store/chats';
 import { useProjects, type Project } from '@/store/projects';
 import { useSettings } from '@/store/settings';
+import { SUGGESTION_INTERVAL, useSuggestionCache } from '@/store/suggestions';
 import { useUI } from '@/store/ui';
 import { getAdapter, type Endpoint } from './providers';
 import { apiKeys } from './storage';
@@ -17,8 +19,16 @@ const SUGGESTION_ICONS = [
 
 export type PromptSuggestion = { summary: string; prompt: string; icon: typeof SUGGESTION_ICONS[number] };
 
-/** Small text-only excerpts; project chats draw from their own project, general chats from the shared pool. */
-export function recentSuggestionContext(
+function suggestionChatVisible(
+  chat: Conversation, projects: Record<string, Project>, currentId: string | null, projectId: string | null | undefined
+) {
+  if (chat.id === currentId || chat.memory === false || chat.archivedAt || !chat.messages.length) return false;
+  if (projectId) return chat.projectId === projectId;
+  // As with chat lookup, project-only memory must never escape into the shared pool.
+  return !chat.projectId || projects[chat.projectId]?.memory !== 'project';
+}
+
+function recentSuggestionChats(
   conversations: Record<string, Conversation>,
   projects: Record<string, Project>,
   currentId: string | null,
@@ -26,17 +36,21 @@ export function recentSuggestionContext(
   enabled: boolean
 ) {
   const current = currentId ? conversations[currentId] : undefined;
-  if (!enabled || current?.memory === false) return '';
+  if (!enabled || current?.memory === false) return [];
   const projectId = current ? current.projectId : newChatProjectId;
-  const recent = Object.values(conversations)
-    .filter((chat) => {
-      if (chat.id === currentId || chat.memory === false || chat.archivedAt || !chat.messages.length) return false;
-      if (projectId) return chat.projectId === projectId;
-      // As with chat lookup, project-only memory must never escape into the shared pool.
-      return !chat.projectId || projects[chat.projectId]?.memory !== 'project';
-    })
+  return Object.values(conversations)
+    .filter((chat) => suggestionChatVisible(chat, projects, currentId, projectId))
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 5);
+}
+
+/** Small text-only excerpts; project chats draw from their own project, general chats from the shared pool. */
+export function recentSuggestionContext(
+  conversations: Record<string, Conversation>, projects: Record<string, Project>,
+  currentId: string | null, newChatProjectId: string | null, enabled: boolean
+) {
+  if (!enabled || (currentId && conversations[currentId]?.memory === false)) return '';
+  const recent = recentSuggestionChats(conversations, projects, currentId, newChatProjectId, enabled);
   return JSON.stringify(recent.map((chat) => {
     const messages: { role: 'user' | 'assistant'; text: string }[] = [];
     for (let i = chat.messages.length - 1; i >= 0 && messages.length < 3; i--) {
@@ -109,56 +123,59 @@ export async function generateSuggestions(
   return suggestions;
 }
 
-/** Regenerates on mount or model/project changes, cancelling requests when the empty screen leaves. */
+/** Reuses persisted results and shares one generation allowance across every screen and model. */
 export function useSuggestions(project?: string, memoryOff?: boolean) {
+  const enabled = useSettings((s) => s.suggestions);
   const endpoint = useSettings((s) => s.endpoints.find((e) => e.id === s.active?.endpointId));
   const model = useSettings((s) => s.active?.model);
   const memoryEnabled = useSettings((s) => s.memory);
   const currentId = useUI((s) => s.currentId);
   const newChatProjectId = useUI((s) => s.newChatProjectId);
   const projects = useProjects((s) => s.projects);
-  // Only the bounded excerpt changes this selector's value; streamed tokens are excluded.
-  const recentChats = useChats((s) => recentSuggestionContext(
-    s.conversations, projects, currentId, newChatProjectId, memoryEnabled && !memoryOff
-  ));
-  const [attempt, setAttempt] = useState(0);
-  const request = useMemo(
-    () => endpoint && model && endpoint.models.includes(model) ? { endpoint, model, project, recentChats, attempt } : null,
-    [endpoint, model, project, recentChats, attempt]
-  );
-  const [result, setResult] = useState<{
-    request: NonNullable<typeof request>;
-    suggestions: PromptSuggestion[];
-    error: boolean;
-  } | null>(null);
+  const conversations = useChatList();
+  const current = currentId ? conversations[currentId] : undefined;
+  const projectId = (current ? current.projectId : newChatProjectId) ?? null;
+  const historyEnabled = memoryEnabled && !memoryOff && current?.memory !== false;
+  const scope = JSON.stringify([projectId, projectId ? projects[projectId]?.memory : null, historyEnabled]);
+  const cached = useSuggestionCache((s) => s.entries[scope]);
+  const running = useSuggestionCache((s) => s.running);
+  const failed = useSuggestionCache((s) => s.failed);
+  const lastAttemptAt = useSuggestionCache((s) => s.lastAttemptAt);
+  // A cached label must disappear if its source is deleted, archived, or moved behind a privacy boundary.
+  const cacheVisible = cached?.sourceChatIds.every((id) => {
+    const chat = conversations[id];
+    return chat && suggestionChatVisible(chat, projects, currentId, projectId);
+  });
 
   useEffect(() => {
-    if (!request) return;
-    const { endpoint, model, project, recentChats } = request;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      controller.abort();
-      setResult({ request, suggestions: [], error: true });
-    }, 20_000);
-    void generateSuggestions(endpoint, model, controller.signal, project, recentChats)
-      .then((suggestions) => {
-        if (!controller.signal.aborted) setResult({ request, suggestions, error: false });
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setResult({ request, suggestions: [], error: true });
-      })
-      .finally(() => clearTimeout(timeout));
+    if (!enabled || !endpoint || !model || !endpoint.models.includes(model)) return;
+    const refresh = () => {
+      const cache = useSuggestionCache.getState();
+      if (cache.lastAttemptAt !== null && Date.now() < cache.lastAttemptAt + SUGGESTION_INTERVAL) return;
+      const chats = useChats.getState().conversations;
+      const projects = useProjects.getState().projects;
+      const recent = recentSuggestionChats(chats, projects, currentId, projectId, historyEnabled);
+      const context = recentSuggestionContext(chats, projects, currentId, projectId, historyEnabled);
+      void cache.refresh(scope, recent.map((chat) => chat.id), (signal) =>
+        generateSuggestions(endpoint, model, signal, project, context)
+      );
+    };
+    refresh();
+    const timeout = lastAttemptAt === null ? undefined : setTimeout(
+      refresh, Math.max(1, lastAttemptAt + SUGGESTION_INTERVAL - Date.now())
+    );
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refresh();
+    });
     return () => {
       clearTimeout(timeout);
-      controller.abort();
+      subscription.remove();
     };
-  }, [request]);
+  }, [enabled, endpoint, model, project, scope, currentId, projectId, historyEnabled, lastAttemptAt]);
 
-  const current = result?.request === request ? result : null;
   return {
-    suggestions: current?.suggestions ?? [],
-    loading: !!request && !current,
-    error: current?.error ?? false,
-    retry: () => setAttempt((n) => n + 1),
+    suggestions: enabled && cacheVisible ? cached.suggestions : [],
+    loading: enabled && running === scope,
+    error: enabled && failed === scope,
   };
 }

@@ -17,7 +17,7 @@ type Props = {
 
 export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff, project }: Props) {
   const { colors } = useTheme();
-  const { suggestions, loading, error, retry } = useSuggestions(project, memoryOff);
+  const { suggestions, loading, error } = useSuggestions(project, memoryOff);
 
   if (!hasEndpoint) {
     return (
@@ -57,11 +57,10 @@ export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff
       {loading && (
         <Text style={[styles.status, styles.loading, { color: colors.textTertiary }]}>Generating suggestions…</Text>
       )}
-      {error && (
-        <Pressable onPress={retry} accessibilityRole="button" style={styles.row}>
-          <Feather name="refresh-cw" size={22} color={colors.textSecondary} />
-          <Text style={[styles.status, { color: colors.textSecondary }]}>Suggestions unavailable. Tap to retry.</Text>
-        </Pressable>
+      {error && !suggestions.length && (
+        <Text style={[styles.status, styles.loading, { color: colors.textSecondary }]}>
+          Suggestions unavailable. Please try again tomorrow.
+        </Text>
       )}
       {suggestions.map((s, index) => (
         <Pressable

@@ -62,6 +62,8 @@ export default function SettingsScreen() {
   const setShowArchived = useSettings((s) => s.setShowArchived);
   const titleGeneration = useSettings((s) => s.titleGeneration);
   const setTitleGeneration = useSettings((s) => s.setTitleGeneration);
+  const suggestions = useSettings((s) => s.suggestions);
+  const setSuggestions = useSettings((s) => s.setSuggestions);
   const followUp = useSettings((s) => s.followUp);
   const setFollowUp = useSettings((s) => s.setFollowUp);
   const memoryCount = useMemory((s) => s.memories.filter((m) => !m.projectId).length);
@@ -127,6 +129,13 @@ export default function SettingsScreen() {
           detail="Ask the model to name each chat after its first reply"
           value={titleGeneration}
           onValueChange={setTitleGeneration}
+        />
+        <ToggleRow
+          icon="message-circle"
+          title="Suggested prompts"
+          detail="Show ideas from recent chats, generated at most once every 24 hours"
+          value={suggestions}
+          onValueChange={setSuggestions}
         />
         <ToggleRow
           icon="archive"
