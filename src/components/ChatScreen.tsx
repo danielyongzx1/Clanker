@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useDerivedValue, useSharedValue } from 'react-native-reanimated';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,8 +21,6 @@ import { useProjects } from '@/store/projects';
 import { useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
 import { useBackends } from '@/store/backends';
-import { BackendPicker, RemoteModelPicker } from './BackendPicker';
-import { RemoteFilesButton } from './RemoteReply';
 import { refreshRemoteBackend, resumeRemoteChat } from '@/lib/remote/chat';
 
 // How far the header fade reaches past its controls into the conversation.
@@ -83,7 +81,6 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
 
   const [draft, setDraft] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [backendPickerOpen, setBackendPickerOpen] = useState(false);
   // The conversation runs under the floating header and composer; these are their measured
   // heights (fade included) so content can rest clear of them. The composer's is measured
   // collapsed, and its growth while expanding is added on the UI thread: measuring it every
@@ -160,11 +157,13 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
             <Animated.View style={[styles.container, { paddingTop: topInset }, emptyInsetStyle]}>
               <EmptyState
                 hasEndpoint={remote ? !!remoteModel : hasEndpoint}
-                remote={remote}
+                remote={remote ? backendName : undefined}
                 memoryOff={memoryOff}
                 project={projectName}
                 onSuggestion={setDraft}
-                onAddEndpoint={() => router.push(remote ? '/settings/backends' : '/settings/endpoint')}
+                onAddEndpoint={() =>
+                  router.push(remote ? { pathname: '/settings/backend', params: { id: backendId } } : '/settings/endpoint')
+                }
               />
             </Animated.View>
           )}
@@ -193,7 +192,8 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
           title={remote ? (conversation?.model ?? remoteModel ?? backendName) : active?.model ?? 'Clanker'}
           onMenu={onMenu}
           onBack={onBack}
-          onTitle={remote ? (!conversation || conversation.empty ? () => setPickerOpen(true) : undefined) : () => setPickerOpen(true)}
+          onTitle={() => setPickerOpen(true)}
+          backend={remote ? backendName : undefined}
           onNewChat={
             currentId
               ? () => (conversation?.projectId ? useUI.getState().openNewInProject(conversation.projectId) : open(null))
@@ -204,16 +204,9 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
             !currentId && memorySetting && !remote ? () => useUI.getState().setNewChatMemoryOff(!newChatMemoryOff) : undefined
           }
         />
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 }}>
-          {conversation && !conversation.empty ? <Text style={{ color: colors.textSecondary, fontSize: 13 }}>{backendName}</Text> :
-            <Pressable onPress={() => setBackendPickerOpen(true)} accessibilityRole="button" accessibilityLabel="Choose backend" style={{ padding: 8 }}><Text style={{ color: colors.link }}>{backendName} · Choose backend</Text></Pressable>}
-          {remote && currentId && <RemoteFilesButton chatId={currentId} />}
-        </View>
       </View>
 
-      {remote ? <RemoteModelPicker backendId={backendId} visible={pickerOpen} onClose={() => setPickerOpen(false)} /> :
-        <ModelPicker visible={pickerOpen} onClose={() => setPickerOpen(false)} onManage={() => router.push('/settings')} />}
-      <BackendPicker visible={backendPickerOpen} onClose={() => setBackendPickerOpen(false)} onManage={() => router.push('/settings/backends')} />
+      <ModelPicker visible={pickerOpen} onClose={() => setPickerOpen(false)} conversationId={currentId} />
     </View>
   );
 }

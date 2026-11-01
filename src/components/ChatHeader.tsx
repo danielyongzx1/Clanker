@@ -15,9 +15,11 @@ type Props = {
   memoryOff?: boolean;
   /** Given on a new chat: flips memory for it, in place of the new-chat button. */
   onToggleMemory?: () => void;
+  /** The remote backend this chat runs on, marked on the title; unset for the built-in agent. */
+  backend?: string;
 };
 
-export function ChatHeader({ title, onMenu, onBack, onTitle, onNewChat, memoryOff, onToggleMemory }: Props) {
+export function ChatHeader({ title, onMenu, onBack, onTitle, onNewChat, memoryOff, onToggleMemory, backend }: Props) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const circle = [styles.circle, { backgroundColor: colors.chrome, borderColor: colors.chromeBorder }];
@@ -55,7 +57,7 @@ export function ChatHeader({ title, onMenu, onBack, onTitle, onNewChat, memoryOf
         <Pressable
           onPress={onTitle}
           disabled={!onTitle}
-          accessibilityLabel={onTitle ? 'Choose model' : title}
+          accessibilityLabel={`${backend ? `${title} on ${backend}` : title}${onTitle ? ', choose model' : ''}`}
           style={({ pressed }) => [
             styles.track,
             { backgroundColor: colors.segmentTrack },
@@ -64,6 +66,7 @@ export function ChatHeader({ title, onMenu, onBack, onTitle, onNewChat, memoryOf
         >
           <View style={[styles.thumb, { backgroundColor: colors.segmentThumb }]}>
             {memoryOff && <Feather name="eye-off" size={15} color={colors.textSecondary} />}
+            {!!backend && <Feather name="server" size={15} color={colors.textSecondary} />}
             <Text numberOfLines={1} style={[styles.titleText, { color: colors.text }]}>
               {title}
             </Text>

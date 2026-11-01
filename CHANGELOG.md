@@ -1,6 +1,8 @@
 # Unreleased
 
-- Move project and plugin links to `danielyongzx1`; check for app releases in the new Clanker repository.
+- Tidy backend choice and setup: pick the backend from chips at the top of the model sheet instead of a link under the chat title, which now carries a server icon on remote chats; an open remote chat's title shows its locked model and remote files. Remote backends get their own Settings section and a dedicated add/edit screen laid out like the endpoint editor, with setup steps, a test button with a status card, a searchable default-model list and save from the header.
+
+- Move project and plugin links to `danielyongzx1`; check for app releases in both the new and the original Clanker repositories, taking the newest, so either account can publish updates.
 - Publish the standalone MIT-licensed [dsh-clanker-bridge](https://github.com/danielyongzx1/dsh-clanker-bridge) for new Harness Desktop devices, bundling the bridge and creating per-device pairing credentials without a Clanker checkout. Preserve existing checkout-based installations; document the separate dshmarket submission.
 - Add a local Harness Desktop plugin that starts/supervises its bridge and refreshes per-launch credentials while keeping saved chats bound to the same Desktop profile.
 - Add a Windows sign-in helper for the Hermes bridge using its existing persistent credentials.

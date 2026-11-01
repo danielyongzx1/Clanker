@@ -6,7 +6,8 @@ import { useTheme } from '@/lib/theme';
 const SUGGESTION_COLORS = ['#4C8DF6', '#EA4335', '#34A853', '#F4B400'];
 
 type Props = {
-  remote?: boolean;
+  /** The remote backend the chat about to be started runs on; unset for the built-in agent. */
+  remote?: string;
   hasEndpoint: boolean;
   onSuggestion: (text: string) => void;
   onAddEndpoint: () => void;
@@ -23,9 +24,11 @@ export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff
   if (!hasEndpoint) {
     return (
       <View style={styles.center}>
-        <Text style={[styles.heading, { color: colors.text }]}>Connect a model to start</Text>
+        <Text style={[styles.heading, { color: colors.text }]}>
+          {remote ? `${remote} has no model yet` : 'Connect a model to start'}
+        </Text>
         <Pressable onPress={onAddEndpoint} style={[styles.cta, { backgroundColor: colors.sendBg }]}>
-          <Text style={[styles.ctaText, { color: colors.sendFg }]}>Add an endpoint</Text>
+          <Text style={[styles.ctaText, { color: colors.sendFg }]}>{remote ? 'Check the backend' : 'Add an endpoint'}</Text>
         </Pressable>
       </View>
     );
@@ -46,7 +49,17 @@ export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff
           </Text>
         </View>
       )}
-      {remote && !project && <View style={styles.temporary}><Feather name="server" size={22} color={colors.textSecondary} /><Text style={[styles.temporaryTitle, { color: colors.text }]}>Remote chat</Text><Text style={[styles.temporaryText, { color: colors.textTertiary }]}>Tools and files run on your remote device. This chat keeps its backend after the first message.</Text></View>}
+      {!!remote && !project && (
+        <View style={styles.temporary}>
+          <Feather name="server" size={22} color={colors.textSecondary} />
+          <Text numberOfLines={2} style={[styles.temporaryTitle, { color: colors.text }]}>
+            {remote}
+          </Text>
+          <Text style={[styles.temporaryText, { color: colors.textTertiary }]}>
+            Tools, files and memory live on that device. The chat stays on it after the first message.
+          </Text>
+        </View>
+      )}
       {memoryOff && !project && (
         <View style={styles.temporary}>
           <Feather name="eye-off" size={22} color={colors.textSecondary} />

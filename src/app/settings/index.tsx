@@ -10,6 +10,7 @@ import { entryOn, LOCAL_TOOL_GROUPS, WEB_TOOLS } from '@/lib/tools/catalog';
 import { useTheme } from '@/lib/theme';
 import { SEARCH_PROVIDERS } from '@/lib/tools/web';
 import { updatesSupported } from '@/lib/updates';
+import { useBackends } from '@/store/backends';
 import { useMemory } from '@/store/memory';
 import { useSettings, type FollowUpMode, type ThemePreference } from '@/store/settings';
 import { useUpdates } from '@/store/updates';
@@ -41,6 +42,7 @@ function webDetail(provider: string, disabled: string[]) {
 export default function SettingsScreen() {
   const { colors } = useTheme();
   const endpoints = useSettings((s) => s.endpoints);
+  const remotes = useBackends((s) => s.remotes);
   const theme = useSettings((s) => s.theme);
   const setTheme = useSettings((s) => s.setTheme);
   const tools = useSettings((s) => s.tools);
@@ -76,18 +78,33 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={styles.content}>
-      <Section><Row icon="server" title="Backends" detail="Clanker, Hermes and DeepSeek Harness" onPress={() => router.push('/settings/backends')} /></Section>
       <Section title="Models" footer="Connect any OpenAI-compatible, Anthropic, Ollama or Gemini API. Keys stay in the device keychain.">
         {endpoints.map((e) => (
           <Row
             key={e.id}
-            icon="server"
+            icon="cloud"
             title={e.name}
             detail={`${PROVIDER_LABELS[e.type]} · ${e.models.length} model${e.models.length === 1 ? '' : 's'}`}
             onPress={() => router.push({ pathname: '/settings/endpoint', params: { id: e.id } })}
           />
         ))}
         <Row icon="plus" title="Add endpoint" tint="link" onPress={() => router.push('/settings/endpoint')} />
+      </Section>
+
+      <Section
+        title="Remote backends"
+        footer="Run chats on Hermes or DeepSeek Harness on another computer, with its own tools and memory. Choose one from the chat title when starting a chat."
+      >
+        {remotes.map((b) => (
+          <Row
+            key={b.id}
+            icon="server"
+            title={b.name}
+            detail={`${b.kind === 'hermes' ? 'Hermes' : 'DeepSeek Harness'} · ${b.model}`}
+            onPress={() => router.push({ pathname: '/settings/backend', params: { id: b.id } })}
+          />
+        ))}
+        <Row icon="plus" title="Add remote backend" tint="link" onPress={() => router.push('/settings/backend')} />
       </Section>
 
       <Section title="Agent" footer="Turn these off for models that don't support tool calling.">

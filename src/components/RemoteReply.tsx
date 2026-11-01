@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { Input, Row } from './Form';
 import { adapterForChat, resumeRemoteChat } from '@/lib/remote/chat';
@@ -44,7 +44,7 @@ export function RemoteFileRows({ chatId, files }: { chatId: string; files: Remot
     } catch (error) { Alert.alert('Could not open remote file', error instanceof Error ? error.message : String(error)); }
     finally { setBusy(null); }
   };
-  return <View>{files.map((file) => <Row key={`${file.id}_${file.version}`} icon="file" title={file.name} detail={busy === file.id ? 'Downloading…' : `${file.path} · ${(file.size / 1024).toFixed(1)} KB`} disabled={!!busy} onPress={() => void download(file)} />)}{!files.length && <Text style={{ color: colors.textSecondary, padding: 12 }}>No files yet.</Text>}</View>;
+  return <View>{files.map((file) => <Row key={`${file.id}_${file.version}`} icon="file" title={file.name} detail={busy === file.id ? 'Downloading…' : `${file.path} · ${(file.size / 1024).toFixed(1)} KB`} disabled={!!busy} onPress={() => void download(file)} />)}{!files.length && <Text style={{ color: colors.textSecondary, paddingHorizontal: 20, paddingVertical: 12 }}>No files yet.</Text>}</View>;
 }
 
 export function RemoteReply({ chatId, reply, reconnect }: { chatId: string; reply?: Reply; reconnect?: boolean }) {
@@ -65,22 +65,23 @@ export function RemoteReply({ chatId, reply, reconnect }: { chatId: string; repl
   </View>;
 }
 
-export function RemoteFilesButton({ chatId }: { chatId: string }) {
+/** Every file in a remote chat's session, listed when mounted. */
+export function RemoteFiles({ chatId }: { chatId: string }) {
   const { colors } = useTheme();
+  // A chat with no session yet has nothing on the host to list.
+  const sessionId = useChats((s) => s.conversations[chatId]?.remote?.sessionId);
   const [files, setFiles] = useState<RemoteFile[] | null>(null);
-  const show = async () => {
-    const sessionId = useChats.getState().conversations[chatId]?.remote?.sessionId;
-    if (!sessionId) { setFiles([]); return; }
-    try { setFiles(await adapterForChat(chatId).files(sessionId)); }
-    catch (error) { Alert.alert('Could not list remote files', error instanceof Error ? error.message : String(error)); }
-  };
-  return <>
-    <Pressable onPress={() => void show()} accessibilityRole="button" style={{ padding: 8 }}><Text style={{ color: colors.link }}>Remote files</Text></Pressable>
-    <Modal visible={files !== null} onRequestClose={() => setFiles(null)} animationType="slide">
-      <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: 64, paddingHorizontal: 20 }}>
-        <Row title="Remote files" value="Done" onPress={() => setFiles(null)} />
-        <RemoteFileRows chatId={chatId} files={files ?? []} />
-      </ScrollView>
-    </Modal>
-  </>;
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!sessionId) return;
+    let active = true;
+    adapterForChat(chatId).files(sessionId)
+      .then((list) => { if (active) setFiles(list); })
+      .catch((e) => { if (active) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { active = false; };
+  }, [chatId, sessionId]);
+  if (!sessionId) return <RemoteFileRows chatId={chatId} files={[]} />;
+  if (error) return <Text selectable style={{ color: colors.danger, paddingHorizontal: 20, paddingVertical: 12 }}>Could not list remote files: {error}</Text>;
+  if (!files) return <ActivityIndicator style={{ padding: 16 }} color={colors.textSecondary} />;
+  return <RemoteFileRows chatId={chatId} files={files} />;
 }

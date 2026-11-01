@@ -5,11 +5,12 @@ import { Platform } from 'react-native';
 
 /**
  * Updates come from the newest GitHub release that has an APK attached, tagged with the app
- * version it carries (`v1.2.0`, `1.2.0` or `v1.2.0-beta.1`). Pre-releases count only when asked
- * for. Android only: iOS apps can't install themselves.
+ * version it carries (`v1.2.0`, `1.2.0` or `v1.2.0-beta.1`), across all the repos below.
+ * Pre-releases count only when asked for. Android only: iOS apps can't install themselves.
  */
 
-const REPO = 'danielyongzx1/Clanker';
+// Both accounts publish releases; the old one is suspended for now, and answers 404 until it's back.
+const REPOS = ['danielyongzx1/Clanker', 'DANIE4588E/Clanker'];
 const CHECK_TIMEOUT = 15_000;
 const APK_TYPE = 'application/vnd.android.package-archive';
 // Intent.FLAG_GRANT_READ_URI_PERMISSION, so the installer can read the APK through the content URI.
@@ -77,32 +78,38 @@ function toRelease(json: GitHubRelease): Release | null {
   return { version, notes: json.body ?? '', apkUrl: apk.browser_download_url, apkSize: apk.size };
 }
 
+/** A repo's candidate releases: the recent ones with prereleases, else only the latest stable one. */
+async function fetchReleases(repo: string, prereleases: boolean, signal: AbortSignal): Promise<Release[]> {
+  const url = `https://api.github.com/repos/${repo}/releases${prereleases ? '?per_page=30' : '/latest'}`;
+  const res = await fetch(url, { headers: { Accept: 'application/vnd.github+json' }, signal });
+  // No stable release published yet, or the repo isn't there.
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error(`GitHub answered ${res.status}.`);
+  const json = await res.json();
+  return (prereleases ? (json as GitHubRelease[]) : [json as GitHubRelease])
+    .filter((r) => !r.draft)
+    .map(toRelease)
+    .filter((r): r is Release => !!r);
+}
+
 /**
- * The newest release when it is newer than this build, else null. With prereleases, the newest
- * of the recent releases, pre-release or not; otherwise only the latest stable one.
+ * The newest release across the repos when it is newer than this build, else null. A repo that
+ * fails is skipped; the check only fails when every repo does.
  */
 export async function fetchNewerRelease(prereleases = false): Promise<Release | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT);
   try {
-    const url = `https://api.github.com/repos/${REPO}/releases${prereleases ? '?per_page=30' : '/latest'}`;
-    const res = await fetch(url, {
-      headers: { Accept: 'application/vnd.github+json' },
-      signal: controller.signal,
-    });
-    // No stable release published yet.
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`GitHub answered ${res.status}.`);
-    const json = await res.json();
-    const candidates = (prereleases ? (json as GitHubRelease[]) : [json as GitHubRelease])
-      .filter((r) => !r.draft)
-      .map(toRelease)
-      .filter((r): r is Release => !!r);
-    const newest = candidates.reduce<Release | null>((best, r) => (!best || isNewer(r.version, best.version) ? r : best), null);
+    const results = await Promise.allSettled(REPOS.map((repo) => fetchReleases(repo, prereleases, controller.signal)));
+    const fulfilled = results.filter((r): r is PromiseFulfilledResult<Release[]> => r.status === 'fulfilled');
+    if (!fulfilled.length) {
+      if (controller.signal.aborted) throw new Error("GitHub didn't answer in time.");
+      throw (results[0] as PromiseRejectedResult).reason;
+    }
+    const newest = fulfilled
+      .flatMap((r) => r.value)
+      .reduce<Release | null>((best, r) => (!best || isNewer(r.version, best.version) ? r : best), null);
     return newest && isNewer(newest.version, currentVersion) ? newest : null;
-  } catch (e) {
-    if (controller.signal.aborted) throw new Error("GitHub didn't answer in time.");
-    throw e;
   } finally {
     clearTimeout(timer);
   }

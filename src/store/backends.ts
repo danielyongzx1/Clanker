@@ -15,7 +15,13 @@ export const useBackends = create<BackendsState>()(persist((set) => ({
   remotes: [],
   selected: 'local',
   select: (selected) => set({ selected }),
-  save: (backend) => set((s) => ({ remotes: [...s.remotes.filter((b) => b.id !== backend.id), backend] })),
+  // Updated in place: selecting a backend refreshes its models, which mustn't reorder the list.
+  save: (backend) =>
+    set((s) => ({
+      remotes: s.remotes.some((b) => b.id === backend.id)
+        ? s.remotes.map((b) => (b.id === backend.id ? backend : b))
+        : [...s.remotes, backend],
+    })),
   remove: (id) => {
     void apiKeys.remove(`bridge_${id}`);
     set((s) => ({ remotes: s.remotes.filter((b) => b.id !== id), selected: s.selected === id ? 'local' : s.selected }));
