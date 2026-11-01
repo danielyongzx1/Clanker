@@ -20,6 +20,8 @@ async function jsonBody(req) {
 const fingerprint = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const runIdentity = (sessionId, submissionId) => createHash('sha256').update(`${sessionId}\0${submissionId}`).digest('hex');
 const unsettled = (run) => !terminal(run.state) || !run.finalized;
+// Routes are provider/model; a chat may move between models of the provider it started with.
+const provider = (model) => model.split('/')[0];
 
 export async function createBridge(config, suppliedAdapter) {
   if (!config.token || config.token.length < 24) throw new Error('Set BRIDGE_TOKEN to a random token of at least 24 characters.');
@@ -116,7 +118,7 @@ export async function createBridge(config, suppliedAdapter) {
       if (req.headers['x-clanker-bridge'] && req.headers['x-clanker-bridge'] !== state.bridgeId) return send({ error: 'Bridge identity changed. Restore the original bridge state.' }, 409);
       const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
       if (parts.shift() !== 'v1') throw fail('Unknown API version.', 404);
-      if (req.method === 'GET' && parts[0] === 'capabilities') return send({ protocol: 1, bridgeId: state.bridgeId, kind: config.kind, models: await readModels(), modelOptions: adapter.modelOptions, maxFileBytes: MAX_FILE_BYTES });
+      if (req.method === 'GET' && parts[0] === 'capabilities') return send({ protocol: 1, bridgeId: state.bridgeId, kind: config.kind, models: await readModels(), modelOptions: adapter.modelOptions, modelSwitching: true, maxFileBytes: MAX_FILE_BYTES });
       if (req.method === 'POST' && parts.length === 1 && parts[0] === 'sessions') {
         const body = await jsonBody(req); assertId(body.chatId);
         if (typeof body.model !== 'string' || typeof body.instructions !== 'string' || body.instructions.length > 16000) throw fail('Invalid session configuration.');
@@ -128,7 +130,8 @@ export async function createBridge(config, suppliedAdapter) {
             session = state.sessions[body.chatId] = { id: body.chatId, upstreamCandidate: `clanker_${state.bridgeId}_${body.chatId}`, model: body.model, instructions: body.instructions, workspace, files: [], uploads: {} };
             await save();
           }
-          if (session.model !== body.model || session.instructions !== body.instructions) throw fail('Session configuration is locked.', 409);
+          // Each run names its own model, so a session only holds its provider.
+          if (provider(session.model) !== provider(body.model) || session.instructions !== body.instructions) throw fail('Session configuration is locked.', 409);
           if (!session.upstreamId) { session.upstreamId = await adapter.ensureSession(session); await save(); }
           return session;
         });
@@ -176,15 +179,23 @@ export async function createBridge(config, suppliedAdapter) {
           const id = runIdentity(session.id, body.submissionId);
           const hash = fingerprint(body);
           if (state.runs[id]) { if (state.runs[id].fingerprint && state.runs[id].fingerprint !== hash) throw fail('Submission identity already has a different payload.', 409); return send({ id }); }
+          const model = body.model ?? session.model;
+          if (typeof model !== 'string') throw fail('Invalid model.');
+          if (model !== session.model) {
+            if (provider(model) !== provider(session.model)) throw fail('A chat can only switch to another model from the same provider.', 409);
+            if (!(await readModels()).includes(model)) throw fail('Model is unavailable. Refresh the backend connection.');
+          }
           if (body.effort !== undefined) {
             await readModels();
-            if (!adapter.modelOptions?.[session.model]?.efforts?.includes(body.effort)) throw fail('This reasoning effort is unavailable for the selected model. Refresh the backend connection.');
+            if (!adapter.modelOptions?.[model]?.efforts?.includes(body.effort)) throw fail('This reasoning effort is unavailable for the selected model. Refresh the backend connection.');
           }
           if (Object.values(state.runs).some((r) => r.sessionId === session.id && unsettled(r))) throw fail('This session already has an unsettled run. Reconnect to it first.', 409);
           const beforeFiles = await files.list(session.id);
           // Recheck after asynchronous filesystem reads, before reserving the run.
           if (state.runs[id]) { if (state.runs[id].fingerprint && state.runs[id].fingerprint !== hash) throw fail('Submission identity already has a different payload.', 409); return send({ id }); }
           if (Object.values(state.runs).some((r) => r.sessionId === session.id && unsettled(r))) throw fail('This session already has an unsettled run.', 409);
+          // Hermes caches the resolved route on the session; the next turn resolves the new one.
+          if (model !== session.model) { session.model = model; delete session.modelRequest; }
           const input = `${body.text}${body.files.length ? '\n\nUploaded files (actual bytes on this device):\n' + body.files.map((fileId) => path.join(session.workspace, session.uploads[fileId].path)).join('\n') : ''}`;
           const run = state.runs[id] = { id, sessionId: session.id, fingerprint: hash, input, effort: body.effort, state: 'running', cursor: 0, content: [], controls: [], files: [], beforeFiles };
           await save(); startTask(run, true); return send({ id }, 202);

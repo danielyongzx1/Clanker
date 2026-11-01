@@ -9,6 +9,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { useShallow } from 'zustand/react/shallow';
 import { PROVIDER_LABELS } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
+import { modelProvider } from '@/lib/remote/types';
 import { useBackends } from '@/store/backends';
 import { useChats } from '@/store/chats';
 import { useSettings } from '@/store/settings';
@@ -32,8 +33,8 @@ type Choice = { key: string; model: string; selected: boolean; onPress: () => vo
 
 /**
  * The sheet behind the chat title. On a new chat it also picks the backend, from chips above the
- * models; once a chat has started its backend is fixed, and a remote chat's model with it, so the
- * sheet shows that chat's remote files instead.
+ * models; once a chat has started its backend is fixed. A remote chat can still switch to another
+ * model from the provider it started with, and the sheet lists that chat's remote files under them.
  */
 export function ModelPicker({ visible, onClose, conversationId }: Props) {
   const { colors } = useTheme();
@@ -147,7 +148,20 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
   const remote = backendId !== 'local';
   // Chats are created by their first message, so only the new-chat state can still switch.
   const canSwitch = !conversation && remotes.length > 0;
-  const remoteLocked = remote && !!conversation?.started;
+  const remoteStarted = remote && !!conversation?.started;
+  // Bridges from before model switching keep a chat on the model it started with.
+  const remoteLocked = remoteStarted && !backend?.modelSwitching;
+  const chatModel = remoteStarted ? conversation?.model : undefined;
+
+  // The current model stays listed even when hidden, so its check mark shows.
+  const remoteModels = useMemo(() => {
+    if (!remote || !backend || remoteLocked) return [];
+    const current = chatModel ?? backend.model;
+    const provider = chatModel && modelProvider(chatModel);
+    return backend.models.filter(
+      (m) => m === current || (!backend.hiddenModels?.includes(m) && (!provider || modelProvider(m) === provider))
+    );
+  }, [remote, backend, remoteLocked, chatModel]);
 
   const sections = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -157,14 +171,17 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
         {
           key: backend.id,
           title: `${backend.name} · ${BACKEND_LABELS[backend.kind]}`,
-          data: backend.models
+          data: remoteModels
             .filter((m) => !q || m.toLowerCase().includes(q))
             .map(
               (m): Choice => ({
                 key: m,
                 model: m,
-                selected: backend.model === m,
-                onPress: () => useBackends.getState().save({ ...backend, model: m }),
+                selected: (chatModel ?? backend.model) === m,
+                onPress: () =>
+                  chatModel && conversationId
+                    ? useChats.getState().setRemoteModel(conversationId, m)
+                    : useBackends.getState().save({ ...backend, model: m }),
               })
             ),
         },
@@ -186,9 +203,9 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
           ),
       }))
       .filter((s) => s.data.length > 0);
-  }, [remote, backend, remoteLocked, endpoints, active, query]);
+  }, [remote, backend, remoteLocked, remoteModels, chatModel, conversationId, endpoints, active, query]);
 
-  const totalModels = remote ? (backend?.models.length ?? 0) : endpoints.reduce((n, e) => n + e.models.length, 0);
+  const totalModels = remote ? remoteModels.length : endpoints.reduce((n, e) => n + e.models.length, 0);
 
   // What of the list sits behind the bottom bar or off the bottom of the screen, so its last rows
   // can still scroll into view.
@@ -270,7 +287,8 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
                 <Feather name="lock" size={16} color={colors.textTertiary} />
               </View>
               <Text style={[styles.note, { color: colors.textTertiary }]}>
-                A remote chat keeps its backend and model. Start a new chat to use another.
+                This bridge keeps a chat on the model it started with. Update the bridge on the host to switch models
+                within a chat, or start a new chat to use another.
               </Text>
               <Text style={[styles.section, { color: colors.textTertiary }]}>Files on the remote device</Text>
               {conversationId && <RemoteFiles chatId={conversationId} />}
@@ -324,6 +342,18 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
                         ? 'This backend has no models. Check its model provider on the host, then refresh it in Settings.'
                         : 'No endpoints yet. Add one to start chatting.'}
                   </Text>
+                }
+                ListFooterComponent={
+                  remoteStarted && conversationId ? (
+                    <>
+                      <Text style={[styles.note, { color: colors.textTertiary }]}>
+                        A remote chat keeps its backend and provider; a new model applies from the next message. Start a
+                        new chat to use another provider.
+                      </Text>
+                      <Text style={[styles.section, { color: colors.textTertiary }]}>Files on the remote device</Text>
+                      <RemoteFiles chatId={conversationId} />
+                    </>
+                  ) : undefined
                 }
               />
             </>

@@ -13,6 +13,10 @@ export type RemoteBackend = {
   modelOptions?: Record<string, { efforts: string[]; defaultEffort?: string }>;
   /** Defaults for new chats; existing chats keep their own effort selection. */
   efforts?: Record<string, string>;
+  /** Kept out of the model picker. */
+  hiddenModels?: string[];
+  /** Whether the bridge lets a chat switch to another model from its provider. */
+  modelSwitching?: boolean;
 };
 
 export type RemoteMetrics = {
@@ -52,6 +56,7 @@ export type RemoteSession = {
   effort?: string;
   /** Frozen before submission, including across reconnection. */
   submissionEffort?: string;
+  submissionModel?: string;
   context?: RemoteMetrics['context'];
 };
 export type RemoteReply = Pick<RemoteSnapshot, 'state' | 'files' | 'controls'>;
@@ -61,8 +66,11 @@ export type BridgeInfo = {
   kind: RemoteBackend['kind'];
   models: string[];
   modelOptions?: RemoteBackend['modelOptions'];
+  modelSwitching?: boolean;
   maxFileBytes: number;
 };
 
 export const MAX_REMOTE_FILE_BYTES = 20 * 1024 * 1024;
+/** Models are provider/model routes; a chat can only switch within its provider. */
+export const modelProvider = (model: string) => model.split('/')[0];
 export const remoteTerminal = (state: RunState) => ['completed', 'cancelled', 'failed'].includes(state);

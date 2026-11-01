@@ -232,7 +232,7 @@ Durable event sequence identities replace repeated usage samples, so replaying t
 2. In Clanker, open **Settings → Backends → Add remote backend**.
 3. Enter a name, the bridge address (for example `http://192.168.1.10:8787`) and bridge token. A phone's `localhost` refers to the phone.
 4. Tap **Test connection**, select a model, and **Save**.
-5. Open a new chat and tap **Choose backend** before sending the first message. The chat's backend and remote model are locked after it starts.
+5. Open a new chat and tap **Choose backend** before sending the first message. The chat's backend and model provider are locked after it starts; from the chat title it can still switch to another model from the same provider, from the next message on. In the backend editor, tap a model's eye to hide it from the model picker.
 
 In the backend editor, use **Add alternative address** to save LAN, VPN and HTTPS addresses for this same bridge. All addresses use the same bridge token and must return the same bridge identity. The app selects a reachable authenticated address and rechecks when the network changes. It can safely retry uploads and submissions under their existing receipt identities; approvals are not automatically repeated after uncertain delivery. Save alternatives before leaving the LAN. An alternative address must already route to the bridge through your VPN or HTTPS access setup; saving a URL does not establish that route.
 

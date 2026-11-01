@@ -127,6 +127,8 @@ interface ChatsState {
   remove: (id: string) => void;
   rename: (id: string, title: string, titled?: boolean) => void;
   setModel: (id: string, endpointId: string, model: string) => void;
+  /** Takes effect from the next turn; the bridge only accepts a model from the chat's provider. */
+  setRemoteModel: (id: string, model: string) => void;
   setPinned: (id: string, pinned: boolean) => void;
   /** Archiving also unpins. */
   setArchived: (id: string, archived: boolean) => void;
@@ -236,6 +238,8 @@ export const useChats = create<ChatsState>()(
         rename: (id, title, titled = true) => patchConversation(id, () => ({ title, titled })),
         setModel: (id, endpointId, model) => patchConversation(id, (c) =>
           c.backendId && c.backendId !== 'local' ? {} : { endpointId, model }),
+        setRemoteModel: (id, model) => patchConversation(id, (c) =>
+          c.backendId && c.backendId !== 'local' ? { model } : {}),
         setRemote: (id, patch) => patchConversation(id, (c) => ({ remote: { ...c.remote!, ...patch } })),
         setPinned: (id, pinned) => patchConversation(id, () => ({ pinnedAt: pinned ? Date.now() : undefined })),
         setArchived: (id, archived) =>

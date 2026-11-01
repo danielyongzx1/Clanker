@@ -30,7 +30,7 @@ export async function refreshRemoteBackend(backendId: string) {
   const info = await new RemoteAdapter(backend).info();
   const current = useBackends.getState().remotes.find((b) => b.id === backendId);
   if (!current || current.bridgeId !== info.bridgeId) return;
-  useBackends.getState().save({ ...current, models: info.models, modelOptions: info.modelOptions });
+  useBackends.getState().save({ ...current, models: info.models, modelOptions: info.modelOptions, modelSwitching: info.modelSwitching });
 }
 
 export function remoteEffortForChat(id: string) {
@@ -59,7 +59,7 @@ export function sendRemoteMessage(id: string | null, text: string, attachments: 
   const userMessageId = chats.addMessage(id, { role: 'user', status: 'done', content: [...attachments, ...(text ? [{ type: 'text' as const, text }] : [])] });
   const replyId = chats.addMessage(id, { role: 'assistant', status: 'streaming', content: [], model: chat.model });
   const effort = options ? options.effort : remoteEffortForChat(id);
-  chats.setRemote(id, { ...(!options && chat.remote?.effort === undefined ? { effort } : {}), submissionEffort: effort, submissionId: userMessageId, userMessageId, replyId, cursor: 0, runId: undefined });
+  chats.setRemote(id, { ...(!options && chat.remote?.effort === undefined ? { effort } : {}), submissionEffort: effort, submissionModel: chat.model, submissionId: userMessageId, userMessageId, replyId, cursor: 0, runId: undefined });
   flushJsonStorage();
   void resumeRemoteChat(id);
   return id;
@@ -78,7 +78,7 @@ export async function resumeRemoteChat(id: string) {
     const instructions = initial.remote.instructions ?? (initial.projectId ? useProjects.getState().projects[initial.projectId]?.instructions ?? '' : '');
     let sessionId = initial.remote.sessionId;
     if (!sessionId) {
-      sessionId = (await adapter.ensureSession(id, initial.model, instructions)).sessionId;
+      sessionId = (await adapter.ensureSession(id, initial.remote.submissionModel ?? initial.model, instructions)).sessionId;
       useChats.getState().setRemote(id, { sessionId });
       flushJsonStorage();
     }
@@ -95,7 +95,7 @@ export async function resumeRemoteChat(id: string) {
       }
       runId = (useChats.getState().conversations[id]?.remote?.stopRequested
         ? await adapter.stopSubmission(sessionId, initial.remote.submissionId)
-        : await adapter.start(sessionId, initial.remote.submissionId, messageText(user), files, initial.remote.submissionEffort)).id;
+        : await adapter.start(sessionId, initial.remote.submissionId, messageText(user), files, initial.remote.submissionEffort, initial.remote.submissionModel)).id;
       useChats.getState().setRemote(id, { runId });
       flushJsonStorage();
     }
@@ -125,7 +125,7 @@ export async function resumeRemoteChat(id: string) {
         if (remoteTerminal(snapshot.state)) {
           completed = snapshot.state === 'completed';
           cancelled = snapshot.state === 'cancelled';
-          useChats.getState().setRemote(id, { submissionId: undefined, submissionEffort: undefined, runId: undefined, replyId: undefined, userMessageId: undefined, stopRequested: false });
+          useChats.getState().setRemote(id, { submissionId: undefined, submissionEffort: undefined, submissionModel: undefined, runId: undefined, replyId: undefined, userMessageId: undefined, stopRequested: false });
           flushJsonStorage();
           void notifyReplyFinished(id, initial.remote.replyId);
           break;

@@ -105,6 +105,8 @@ type RowProps = {
   /** Shown by default on plain rows that go somewhere when tapped. */
   chevron?: boolean;
   selected?: boolean;
+  /** Greys the title, for an item that's set aside but still tappable. */
+  muted?: boolean;
   tint?: 'link' | 'danger';
   disabled?: boolean;
   /** Drawn at the trailing edge; given whether the row is being pressed. */
@@ -122,6 +124,7 @@ export function Row({
   value,
   onPress,
   selected,
+  muted,
   tint,
   disabled,
   trailing,
@@ -153,7 +156,7 @@ export function Row({
         >
           {icon && <Feather name={icon} size={ICON} color={tintColor ?? colors.textSecondary} />}
           <View style={styles.rowText}>
-            <Text numberOfLines={1} style={[styles.rowTitle, { color: tintColor ?? colors.text }]}>
+            <Text numberOfLines={1} style={[styles.rowTitle, { color: tintColor ?? (muted ? colors.textTertiary : colors.text) }]}>
               {title}
             </Text>
             {detail && (

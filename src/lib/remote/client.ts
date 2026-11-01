@@ -66,8 +66,8 @@ export class RemoteAdapter {
     return response.json() as Promise<RemoteFile>;
   }
 
-  start(sessionId: string, submissionId: string, text: string, files: string[], effort?: string) {
-    return this.json<{ id: string }>(`sessions/${encodeURIComponent(sessionId)}/runs`, { submissionId, text, files, ...(effort ? { effort } : {}) }, true);
+  start(sessionId: string, submissionId: string, text: string, files: string[], effort?: string, model?: string) {
+    return this.json<{ id: string }>(`sessions/${encodeURIComponent(sessionId)}/runs`, { submissionId, text, files, ...(effort ? { effort } : {}), ...(model ? { model } : {}) }, true);
   }
   snapshot(runId: string) { return this.json<RemoteSnapshot>(`runs/${encodeURIComponent(runId)}`); }
   stop(runId: string) { return this.json(`runs/${encodeURIComponent(runId)}/stop`, {}); }

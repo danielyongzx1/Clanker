@@ -1,5 +1,6 @@
 # Unreleased
 
+- Switch a Hermes or DeepSeek Harness chat to another model from the same provider after it starts, from the chat title; the change applies from the next message, and the model sheet still lists the chat's remote files below the models. Requires the updated bridge, which now accepts a model with each turn; older bridges keep the chat on its first model. Hide individual models from the picker with the eye button in the backend editor.
 - Tidy backend choice and setup: pick the backend from chips at the top of the model sheet instead of a link under the chat title, which now carries a server icon on remote chats; an open remote chat's title shows its locked model and remote files. Remote backends get their own Settings section and a dedicated add/edit screen laid out like the endpoint editor, with setup steps, a test button with a status card, a searchable default-model list and save from the header.
 
 - Move project and plugin links to `danielyongzx1`; check for app releases in both the new and the original Clanker repositories, taking the newest, so either account can publish updates.

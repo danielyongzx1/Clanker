@@ -1,6 +1,6 @@
 import Feather from '@expo/vector-icons/Feather';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { LinearTransition } from 'react-native-reanimated';
 import { Disclosure, Input, Label, Row, Section } from '@/components/Form';
@@ -41,6 +41,7 @@ export default function BackendScreen() {
   const [showToken, setShowToken] = useState(false);
   const [models, setModels] = useState<string[]>(existing?.models ?? []);
   const [model, setModel] = useState(existing?.model ?? '');
+  const [hidden, setHidden] = useState<string[]>(existing?.hiddenModels ?? []);
   const [modelFilter, setModelFilter] = useState('');
   const [busy, setBusy] = useState<'test' | 'save' | null>(null);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
@@ -79,7 +80,7 @@ export default function BackendScreen() {
       bridgeAddresses(draft);
       const info = await new RemoteAdapter(draft, token.trim()).info();
       if (!info.models.length) throw new Error('The backend has no available models. Configure its model provider on the host first.');
-      const chosen = info.models.includes(model) ? model : info.models[0];
+      const chosen = info.models.includes(model) ? model : (info.models.find((m) => !hidden.includes(m)) ?? info.models[0]);
       setModels(info.models);
       setModel(chosen);
       if (save) {
@@ -92,7 +93,10 @@ export default function BackendScreen() {
           models: info.models,
           model: chosen,
           modelOptions: info.modelOptions,
+          modelSwitching: info.modelSwitching,
           efforts: existing?.efforts,
+          // The model for new chats is never hidden.
+          hiddenModels: hidden.filter((m) => m !== chosen && info.models.includes(m)),
         };
         await apiKeys.set(`bridge_${backend.id}`, token.trim());
         useBackends.getState().save(backend);
@@ -124,6 +128,16 @@ export default function BackendScreen() {
         },
       },
     ]);
+
+  // Stable, so tapping a row re-renders only that row rather than the whole list.
+  const toggleHidden = useCallback(
+    (m: string) => setHidden((h) => (h.includes(m) ? h.filter((x) => x !== m) : [...h, m])),
+    []
+  );
+  const selectModel = useCallback((m: string) => {
+    setModel(m);
+    setHidden((h) => h.filter((x) => x !== m));
+  }, []);
 
   const visibleModels = useMemo(() => {
     const q = modelFilter.trim().toLowerCase();
@@ -254,9 +268,19 @@ export default function BackendScreen() {
               {models.length > 10 && (
                 <Input value={modelFilter} onChangeText={setModelFilter} placeholder="Search models or providers" style={{ marginBottom: 8 }} />
               )}
-              <Section inset={16} footer="Each chat keeps the model it started with; pick another for a new chat from the chat title.">
+              <Section
+                inset={16}
+                footer="Tap a model to start new chats with it, or its eye to hide it from the model picker. From the chat title, a chat can switch to another model from the provider it started with."
+              >
                 {visibleModels.slice(0, 200).map((m) => (
-                  <Row key={m} title={m} selected={model === m} onPress={() => setModel(m)} accessibilityRole="radio" accessibilityState={{ checked: model === m }} />
+                  <ModelRow
+                    key={m}
+                    model={m}
+                    selected={model === m}
+                    hidden={hidden.includes(m)}
+                    onSelect={selectModel}
+                    onToggleHidden={toggleHidden}
+                  />
                 ))}
                 {!visibleModels.length && <Row title="No models match" />}
               </Section>
@@ -284,6 +308,50 @@ export default function BackendScreen() {
     </KeyboardAvoidingView>
   );
 }
+
+/** A model in the list: tap to start new chats with it, or its eye to hide it from the model picker. */
+const ModelRow = memo(function ModelRow({
+  model,
+  selected,
+  hidden,
+  onSelect,
+  onToggleHidden,
+}: {
+  model: string;
+  selected: boolean;
+  hidden: boolean;
+  onSelect: (model: string) => void;
+  onToggleHidden: (model: string) => void;
+}) {
+  const { colors } = useTheme();
+  return (
+    <Row
+      title={model}
+      muted={hidden}
+      selected={selected}
+      onPress={() => onSelect(model)}
+      // The model for new chats is always shown, so it has no hide button.
+      trailing={
+        selected
+          ? undefined
+          : () => (
+              <Pressable
+                onPress={() => onToggleHidden(model)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={hidden ? `Show ${model}` : `Hide ${model}`}
+              >
+                <Feather name={hidden ? 'eye-off' : 'eye'} size={18} color={colors.textTertiary} />
+              </Pressable>
+            )
+      }
+      accessibilityRole="radio"
+      accessibilityState={{ checked: selected }}
+      accessibilityActions={selected ? undefined : [{ name: 'toggleHidden', label: hidden ? 'Show in model list' : 'Hide from model list' }]}
+      onAccessibilityAction={(e) => e.nativeEvent.actionName === 'toggleHidden' && onToggleHidden(model)}
+    />
+  );
+});
 
 const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 60 },
