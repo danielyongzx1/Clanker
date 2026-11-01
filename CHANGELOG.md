@@ -1,6 +1,7 @@
 # Unreleased
 
-- Publish the standalone MIT-licensed [dsh-clanker-bridge](https://github.com/DANIE4588E/dsh-clanker-bridge) for new Harness Desktop devices, bundling the bridge and creating per-device pairing credentials without a Clanker checkout. Preserve existing checkout-based installations; document the separate dshmarket submission.
+- Move project and plugin links to `danielyongzx1`; check for app releases in the new Clanker repository.
+- Publish the standalone MIT-licensed [dsh-clanker-bridge](https://github.com/danielyongzx1/dsh-clanker-bridge) for new Harness Desktop devices, bundling the bridge and creating per-device pairing credentials without a Clanker checkout. Preserve existing checkout-based installations; document the separate dshmarket submission.
 - Add a local Harness Desktop plugin that starts/supervises its bridge and refreshes per-launch credentials while keeping saved chats bound to the same Desktop profile.
 - Add a Windows sign-in helper for the Hermes bridge using its existing persistent credentials.
 - Reconcile Harness journal snapshots periodically to recover missed completion events without repeating agent actions; retry transient Windows state-file replacement locks.

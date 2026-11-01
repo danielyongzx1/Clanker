@@ -9,7 +9,7 @@ import { Platform } from 'react-native';
  * for. Android only: iOS apps can't install themselves.
  */
 
-const REPO = 'DANIE4588E/Clanker';
+const REPO = 'danielyongzx1/Clanker';
 const CHECK_TIMEOUT = 15_000;
 const APK_TYPE = 'application/vnd.android.package-archive';
 // Intent.FLAG_GRANT_READ_URI_PERMISSION, so the installer can read the APK through the content URI.
