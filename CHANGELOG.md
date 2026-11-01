@@ -1,4 +1,4 @@
-# Unreleased
+# Clanker 1.2.0-beta.2
 
 - Add the [hermes-clanker-bridge](https://github.com/danielyongzx1/hermes-clanker-bridge) Hermes plugin: install it from Hermes's Plugins and the gateway runs the bridge on Hermes's own Node, with the pairing QR code under Settings → Plugins in Hermes Desktop. It can take over a bridge run from `tools/remote-bridge`, keeping its chats. The bridge now loads its Harness adapter only for Harness, so a Hermes-only bridge needs no DeepSeek packages. The backend editor's setup steps point to the two plugins.
 - Pair or reconnect a Hermes or Harness backend by QR code: bridges write a private `pairing.html` whose code holds their addresses, token and identity, and **Scan QR code** in the backend editor fills in and tests the connection. A code from a bridge that's already saved updates that backend, keeping its chats, efforts and hidden models; the phone's camera can open the code in Clanker too. Adds `expo-camera`, so it needs a new app build.
