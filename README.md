@@ -2,6 +2,8 @@
 
 A ChatGPT-style chat app for iOS and Android (Expo + React Native) that talks to **your own endpoints**.
 
+This is the stable branch. Current development, including remote agent backends, is on [`dev`](https://github.com/danielyongzx1/Clanker/tree/dev). The standalone Harness Desktop plugin lives in [`dsh-clanker-bridge`](https://github.com/danielyongzx1/dsh-clanker-bridge).
+
 Supported API formats:
 
 | Format | Example base URL |
