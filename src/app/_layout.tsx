@@ -15,6 +15,9 @@ import { useSettings } from '@/store/settings';
 
 const RUNTIME_DELAY = 600;
 
+// A screen opened from a link, such as a bridge's pairing code, still has the chats under it.
+export const unstable_settings = { anchor: '(drawer)' };
+
 export default function RootLayout() {
   const themePreference = useSettings((s) => s.theme);
   const toolsOn = useSettings((s) => s.tools);
@@ -68,6 +71,7 @@ export default function RootLayout() {
               <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
               <Stack.Screen name="settings/backend" options={{ presentation: 'modal', title: 'Backend' }} />
               <Stack.Screen name="settings/endpoint" options={{ presentation: 'modal', title: 'Endpoint' }} />
+              <Stack.Screen name="pair" options={{ headerShown: false, animation: 'none' }} />
               <Stack.Screen name="settings/workspace" options={{ title: 'Workspace files' }} />
               <Stack.Screen name="settings/tools" options={{ title: 'Files & code' }} />
               <Stack.Screen name="settings/context" options={{ title: 'Auto-compression' }} />

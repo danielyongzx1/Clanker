@@ -96,26 +96,29 @@ test('full Hermes inventory keeps provider routes distinct and sends the selecte
   const { id } = await f.json('sessions/routed/runs', { submissionId: 'routed', text: 'wait', files: [] });
   await until(() => f.host.runs.has(id));
   assert.equal(f.host.runs.get(id).provider, 'local'); assert.equal(f.host.runs.get(id).model, 'qwen/reasoning');
-  const live = await until(async () => { const run = await f.json(`runs/${id}`); return run.content.some((part) => part.type === 'thought') && run; });
+  // Both reasoning deltas, not a snapshot taken between them.
+  const live = await until(async () => { const run = await f.json(`runs/${id}`); return run.content[0]?.text === 'First thought. Second thought.' && run; });
   assert.equal(live.state, 'running'); assert.equal(live.content[0].text, 'First thought. Second thought.');
   await f.json(`runs/${id}/stop`, {}); await f.done(id);
 });
 
-test('a chat switches models within its provider only, from the next submission', async (t) => {
+test('a chat switches to any model the bridge offers, from the next submission', async (t) => {
   const f = await fixture(t);
-  const info = await f.json('capabilities'); assert.equal(info.modelSwitching, true);
+  const info = await f.json('capabilities'); assert.equal(info.modelSwitching, 'any');
   await f.json('sessions', { chatId: 'switch', model: 'local/qwen/reasoning', instructions: '' });
   const first = await f.json('sessions/switch/runs', { submissionId: 'one', text: 'Hello', files: [] });
   await f.done(first.id);
-  assert.equal((await f.request('sessions/switch/runs', { submissionId: 'other', text: 'Hello', files: [], model: 'cloud/qwen/reasoning' })).status, 409);
   assert.equal((await f.request('sessions/switch/runs', { submissionId: 'missing', text: 'Hello', files: [], model: 'local/qwen/missing' })).status, 400);
   const second = await f.json('sessions/switch/runs', { submissionId: 'two', text: 'Hello', files: [], model: 'local/qwen/fast' });
   await f.done(second.id);
+  const third = await f.json('sessions/switch/runs', { submissionId: 'three', text: 'Hello', files: [], model: 'cloud/qwen/reasoning' });
+  await f.done(third.id);
   assert.equal(f.host.runs.get(first.id).model, 'qwen/reasoning');
   assert.equal(f.host.runs.get(second.id).provider, 'local'); assert.equal(f.host.runs.get(second.id).model, 'qwen/fast');
-  // Ensuring the session again with the chat's new model is not a configuration change.
-  assert.equal((await f.json('sessions', { chatId: 'switch', model: 'local/qwen/fast', instructions: '' })).sessionId, 'switch');
-  assert.equal((await f.request('sessions', { chatId: 'switch', model: 'cloud/qwen/reasoning', instructions: '' })).status, 409);
+  assert.equal(f.host.runs.get(third.id).provider, 'cloud'); assert.equal(f.host.runs.get(third.id).model, 'qwen/reasoning');
+  // Ensuring the session again with the chat's current model is not a configuration change; its instructions are.
+  assert.equal((await f.json('sessions', { chatId: 'switch', model: 'cloud/qwen/reasoning', instructions: '' })).sessionId, 'switch');
+  assert.equal((await f.request('sessions', { chatId: 'switch', model: 'cloud/qwen/reasoning', instructions: 'Other' })).status, 409);
 });
 
 test('Hermes effort is per submission; usage survives streaming, reconciliation and bridge restart', async (t) => {

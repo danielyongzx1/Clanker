@@ -49,6 +49,14 @@
           }
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Clanker uses your camera to scan the pairing code of a remote backend.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
       "expo-font",
       "expo-sharing",
       [

@@ -127,7 +127,7 @@ interface ChatsState {
   remove: (id: string) => void;
   rename: (id: string, title: string, titled?: boolean) => void;
   setModel: (id: string, endpointId: string, model: string) => void;
-  /** Takes effect from the next turn; the bridge only accepts a model from the chat's provider. */
+  /** Takes effect from the next turn; the bridge checks the model is one it offers. */
   setRemoteModel: (id: string, model: string) => void;
   setPinned: (id: string, pinned: boolean) => void;
   /** Archiving also unpins. */

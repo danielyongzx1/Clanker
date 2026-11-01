@@ -33,8 +33,8 @@ type Choice = { key: string; model: string; selected: boolean; onPress: () => vo
 
 /**
  * The sheet behind the chat title. On a new chat it also picks the backend, from chips above the
- * models; once a chat has started its backend is fixed. A remote chat can still switch to another
- * model from the provider it started with, and the sheet lists that chat's remote files under them.
+ * models; once a chat has started its backend is fixed. A remote chat can still switch to another of
+ * its backend's models, and the sheet lists that chat's remote files under them.
  */
 export function ModelPicker({ visible, onClose, conversationId }: Props) {
   const { colors } = useTheme();
@@ -157,7 +157,8 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
   const remoteModels = useMemo(() => {
     if (!remote || !backend || remoteLocked) return [];
     const current = chatModel ?? backend.model;
-    const provider = chatModel && modelProvider(chatModel);
+    // Bridges from before switching across providers keep a chat on the provider it started with.
+    const provider = chatModel && backend.modelSwitching !== 'any' && modelProvider(chatModel);
     return backend.models.filter(
       (m) => m === current || (!backend.hiddenModels?.includes(m) && (!provider || modelProvider(m) === provider))
     );
@@ -347,8 +348,9 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
                   remoteStarted && conversationId ? (
                     <>
                       <Text style={[styles.note, { color: colors.textTertiary }]}>
-                        A remote chat keeps its backend and provider; a new model applies from the next message. Start a
-                        new chat to use another provider.
+                        {backend?.modelSwitching === 'any'
+                          ? 'A remote chat keeps its backend; a new model applies from the next message. Start a new chat to use another backend.'
+                          : 'This bridge keeps a chat on the provider it started with; a new model applies from the next message. Update the bridge on the host to switch providers.'}
                       </Text>
                       <Text style={[styles.section, { color: colors.textTertiary }]}>Files on the remote device</Text>
                       <RemoteFiles chatId={conversationId} />

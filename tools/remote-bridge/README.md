@@ -2,7 +2,9 @@
 
 Runs beside **Hermes Agent** or **DeepSeek Harness** and exposes a common API for Clanker's mobile chat interface. The agent executes its own tools on that device. The bridge transfers actual files, retains run receipts, and serves immutable versions of generated or edited files.
 
-Use one bridge process, port, state directory and workspace root per backend. Node **24.9 or newer** is required. Copy this directory to the remote device; the Expo app and its dependencies are not needed there.
+**Most installs don't need this directory.** Install the bridge as a plugin instead: [hermes-clanker-bridge](https://github.com/danielyongzx1/hermes-clanker-bridge) from Hermes's **Plugins**, or [dsh-clanker-bridge](https://github.com/danielyongzx1/dsh-clanker-bridge) from DeepSeek Harness's. Each runs this bridge for you and shows its pairing QR code in the agent's app; the Hermes plugin can also take over a bridge you already run from here (its `import_from` setting). The steps below are for running the bridge yourself.
+
+Use one bridge process, port, state directory and workspace root per backend. Node **24.9 or newer** is required (22 or newer for Hermes alone). Copy this directory to the remote device; the Expo app and its dependencies are not needed there.
 
 ## Install
 
@@ -77,7 +79,7 @@ Enter this value in Clanker's **Bridge token** field. Do not use the agent's ups
    npm start
    ```
 
-The bridge uses authenticated session and Runs APIs, including event replay, approvals, clarification and cancellation. Connection testing verifies the required API features. Use a current Hermes release supporting these endpoints; older servers return an upgrade/setup error. The model list combines the compatibility aliases with the full authenticated provider catalogue from `/api/model/options`. Routes appear as `provider/model`; the exact provider and model are forwarded together, so models with the same name on two providers remain distinct. Existing `hermes-agent` chats keep the default alias. Select other models before a new chat's first message, using its header picker or the backend editor.
+The bridge uses authenticated session and Runs APIs, including event replay, approvals, clarification and cancellation. Connection testing verifies the required API features. Use a current Hermes release supporting these endpoints; older servers return an upgrade/setup error. The model list combines the compatibility aliases with the full authenticated provider catalogue from `/api/model/options`. Routes appear as `provider/model`; the exact provider and model are forwarded together, so models with the same name on two providers remain distinct. Existing `hermes-agent` chats keep the default alias until you pick another model. Pick a model for new chats in the backend editor; a started chat can switch from its header picker, from the next message on.
 
 Hermes's API does not upload document files. The bridge writes them to a chat-specific directory and gives Hermes absolute paths in its session instructions and prompts. **Hermes's file and terminal tools must see those paths.** A local terminal backend on the same machine works directly. If using containers, mount the workspace root into both services at the same absolute path. An SSH/container tool backend with a different filesystem is not automatically synchronized or remapped.
 
@@ -232,7 +234,9 @@ Durable event sequence identities replace repeated usage samples, so replaying t
 2. In Clanker, open **Settings → Backends → Add remote backend**.
 3. Enter a name, the bridge address (for example `http://192.168.1.10:8787`) and bridge token. A phone's `localhost` refers to the phone.
 4. Tap **Test connection**, select a model, and **Save**.
-5. Open a new chat and tap **Choose backend** before sending the first message. The chat's backend and model provider are locked after it starts; from the chat title it can still switch to another model from the same provider, from the next message on. In the backend editor, tap a model's eye to hide it from the model picker.
+
+   Or tap **Scan QR code** in place of steps 3–4. On start, the bridge writes `pairing.html` into its state directory (for example `.clanker-bridge\pairing.html`) and logs its path. Open it on the host and scan its code: Clanker fills in the bridge's LAN addresses and token and tests them. Scanning again from a saved backend reconnects it, keeping its chats, after the host's address or token changes. A bridge listening only on `127.0.0.1` has no code, as the phone can't reach it. Keep the page private: like the token, it gives access to the agent.
+5. Open a new chat and tap **Choose backend** before sending the first message. The chat's backend is locked after it starts; from the chat title it can still switch to any of the backend's models, from the next message on. In the backend editor, tap a model's eye to hide it from the model picker.
 
 In the backend editor, use **Add alternative address** to save LAN, VPN and HTTPS addresses for this same bridge. All addresses use the same bridge token and must return the same bridge identity. The app selects a reachable authenticated address and rechecks when the network changes. It can safely retry uploads and submissions under their existing receipt identities; approvals are not automatically repeated after uncertain delivery. Save alternatives before leaving the LAN. An alternative address must already route to the bridge through your VPN or HTTPS access setup; saving a URL does not establish that route.
 

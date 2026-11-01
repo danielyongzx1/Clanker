@@ -7,7 +7,6 @@ import { pipeline } from 'node:stream/promises';
 import { WorkspaceFiles } from './files.mjs';
 import { MAX_FILE_BYTES, assertId, terminal } from './protocol.mjs';
 import { HermesAdapter } from './hermes.mjs';
-import { HarnessAdapter } from './harness.mjs';
 import { desktopIdentity } from './desktop-discovery.mjs';
 import { writeState } from './persistence.mjs';
 
@@ -20,13 +19,12 @@ async function jsonBody(req) {
 const fingerprint = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const runIdentity = (sessionId, submissionId) => createHash('sha256').update(`${sessionId}\0${submissionId}`).digest('hex');
 const unsettled = (run) => !terminal(run.state) || !run.finalized;
-// Routes are provider/model; a chat may move between models of the provider it started with.
-const provider = (model) => model.split('/')[0];
 
 export async function createBridge(config, suppliedAdapter) {
   if (!config.token || config.token.length < 24) throw new Error('Set BRIDGE_TOKEN to a random token of at least 24 characters.');
   if (!['hermes', 'harness'].includes(config.kind)) throw new Error('kind must be hermes or harness.');
-  const adapter = suppliedAdapter ?? (config.kind === 'hermes' ? new HermesAdapter(config) : new HarnessAdapter(config));
+  // Harness's adapter needs Harness's client packages, which a Hermes-only install doesn't have.
+  const adapter = suppliedAdapter ?? (config.kind === 'hermes' ? new HermesAdapter(config) : new (await import('./harness.mjs')).HarnessAdapter(config));
   const stateDir = path.resolve(config.stateDir ?? '.clanker-bridge');
   await mkdir(stateDir, { recursive: true });
   if ((await lstat(stateDir)).isSymbolicLink()) throw new Error('State directory must not be a symlink.');
@@ -118,7 +116,7 @@ export async function createBridge(config, suppliedAdapter) {
       if (req.headers['x-clanker-bridge'] && req.headers['x-clanker-bridge'] !== state.bridgeId) return send({ error: 'Bridge identity changed. Restore the original bridge state.' }, 409);
       const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
       if (parts.shift() !== 'v1') throw fail('Unknown API version.', 404);
-      if (req.method === 'GET' && parts[0] === 'capabilities') return send({ protocol: 1, bridgeId: state.bridgeId, kind: config.kind, models: await readModels(), modelOptions: adapter.modelOptions, modelSwitching: true, maxFileBytes: MAX_FILE_BYTES });
+      if (req.method === 'GET' && parts[0] === 'capabilities') return send({ protocol: 1, bridgeId: state.bridgeId, kind: config.kind, models: await readModels(), modelOptions: adapter.modelOptions, modelSwitching: 'any', maxFileBytes: MAX_FILE_BYTES });
       if (req.method === 'POST' && parts.length === 1 && parts[0] === 'sessions') {
         const body = await jsonBody(req); assertId(body.chatId);
         if (typeof body.model !== 'string' || typeof body.instructions !== 'string' || body.instructions.length > 16000) throw fail('Invalid session configuration.');
@@ -130,8 +128,8 @@ export async function createBridge(config, suppliedAdapter) {
             session = state.sessions[body.chatId] = { id: body.chatId, upstreamCandidate: `clanker_${state.bridgeId}_${body.chatId}`, model: body.model, instructions: body.instructions, workspace, files: [], uploads: {} };
             await save();
           }
-          // Each run names its own model, so a session only holds its provider.
-          if (provider(session.model) !== provider(body.model) || session.instructions !== body.instructions) throw fail('Session configuration is locked.', 409);
+          // Each run names its own model, so only the instructions are fixed.
+          if (session.instructions !== body.instructions) throw fail('Session configuration is locked.', 409);
           if (!session.upstreamId) { session.upstreamId = await adapter.ensureSession(session); await save(); }
           return session;
         });
@@ -181,10 +179,7 @@ export async function createBridge(config, suppliedAdapter) {
           if (state.runs[id]) { if (state.runs[id].fingerprint && state.runs[id].fingerprint !== hash) throw fail('Submission identity already has a different payload.', 409); return send({ id }); }
           const model = body.model ?? session.model;
           if (typeof model !== 'string') throw fail('Invalid model.');
-          if (model !== session.model) {
-            if (provider(model) !== provider(session.model)) throw fail('A chat can only switch to another model from the same provider.', 409);
-            if (!(await readModels()).includes(model)) throw fail('Model is unavailable. Refresh the backend connection.');
-          }
+          if (model !== session.model && !(await readModels()).includes(model)) throw fail('Model is unavailable. Refresh the backend connection.');
           if (body.effort !== undefined) {
             await readModels();
             if (!adapter.modelOptions?.[model]?.efforts?.includes(body.effort)) throw fail('This reasoning effort is unavailable for the selected model. Refresh the backend connection.');

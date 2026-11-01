@@ -15,8 +15,11 @@ export type RemoteBackend = {
   efforts?: Record<string, string>;
   /** Kept out of the model picker. */
   hiddenModels?: string[];
-  /** Whether the bridge lets a chat switch to another model from its provider. */
-  modelSwitching?: boolean;
+  /**
+   * Whether a started chat can change model: to any of the bridge's models ('any'), or, on bridges
+   * from before that, only to one from the provider it started with (true).
+   */
+  modelSwitching?: boolean | 'any';
 };
 
 export type RemoteMetrics = {
@@ -66,11 +69,11 @@ export type BridgeInfo = {
   kind: RemoteBackend['kind'];
   models: string[];
   modelOptions?: RemoteBackend['modelOptions'];
-  modelSwitching?: boolean;
+  modelSwitching?: RemoteBackend['modelSwitching'];
   maxFileBytes: number;
 };
 
 export const MAX_REMOTE_FILE_BYTES = 20 * 1024 * 1024;
-/** Models are provider/model routes; a chat can only switch within its provider. */
+/** Models are provider/model routes; older bridges only switch a chat within its provider. */
 export const modelProvider = (model: string) => model.split('/')[0];
 export const remoteTerminal = (state: RunState) => ['completed', 'cancelled', 'failed'].includes(state);

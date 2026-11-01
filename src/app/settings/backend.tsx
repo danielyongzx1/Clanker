@@ -1,11 +1,13 @@
 import Feather from '@expo/vector-icons/Feather';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { LinearTransition } from 'react-native-reanimated';
 import { Disclosure, Input, Label, Row, Section } from '@/components/Form';
+import { QrScanner } from '@/components/QrScanner';
 import { bridgeAddresses } from '@/lib/remote/addresses';
 import { RemoteAdapter } from '@/lib/remote/client';
+import { pairingFromParams, parsePairingLink, type Pairing } from '@/lib/remote/pairing';
 import type { RemoteBackend } from '@/lib/remote/types';
 import { apiKeys } from '@/lib/storage';
 import { useTheme } from '@/lib/theme';
@@ -15,23 +17,24 @@ const KIND_LABELS: Record<RemoteBackend['kind'], string> = { hermes: 'Hermes', h
 
 const STEPS = [
   {
-    title: 'Run the companion bridge',
-    text: 'Install tools/remote-bridge on the device running Hermes or DeepSeek Harness. Its README has the exact commands.',
+    title: 'Install the bridge plugin',
+    text: 'On the device running the agent, install hermes-clanker-bridge from Hermes’s Plugins, or dsh-clanker-bridge from DeepSeek Harness’s Plugins. Both are on github.com/danielyongzx1.',
   },
   {
     title: 'Configure the agent',
-    text: 'Hermes: enable its API server and set its key. Harness: start dsh web --no-open and give the bridge its launch token. Both agents must see the bridge workspace directory.',
+    text: 'Hermes: turn on its API server (API_SERVER_ENABLED and API_SERVER_KEY in its .env), then restart the gateway. Harness needs no setup.',
   },
   {
     title: 'Connect this phone',
-    text: 'Enter the host’s LAN or VPN address and the bridge token below. Use HTTPS over the internet; upstream credentials stay on the host.',
+    text: 'Scan the QR code on the plugin’s page in the agent’s app, or enter the host’s LAN or VPN address and the bridge token below. Use HTTPS over the internet; upstream credentials stay on the host.',
   },
 ];
 
 /** Adds or edits a remote backend: a Hermes or DeepSeek Harness agent reached through its bridge. */
 export default function BackendScreen() {
   const { colors } = useTheme();
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  // `pair` carries a clanker://pair link's parameters when the phone's camera opened one.
+  const { id, pair } = useLocalSearchParams<{ id?: string; pair?: string }>();
   const existing = useBackends((s) => s.remotes.find((b) => b.id === id));
 
   const [name, setName] = useState(existing?.name ?? '');
@@ -45,22 +48,29 @@ export default function BackendScreen() {
   const [modelFilter, setModelFilter] = useState('');
   const [busy, setBusy] = useState<'test' | 'save' | null>(null);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [scanning, setScanning] = useState(false);
+  // From a pairing code, so the bridge that answers must be the one the code was made for.
+  const [pairedBridge, setPairedBridge] = useState('');
 
   // Keyed on the id: the backend is re-saved whenever its model list refreshes, which mustn't
   // overwrite a token being edited.
   const existingId = existing?.id;
   useEffect(() => {
-    if (existingId) void apiKeys.get(`bridge_${existingId}`).then((key) => key && setToken(key));
+    // A token scanned in the meantime wins.
+    if (existingId) void apiKeys.get(`bridge_${existingId}`).then((key) => key && setToken((t) => t || key));
   }, [existingId]);
 
-  /** Reaches the bridge, and saves the backend once it answers when `save` is set. */
-  const connect = async (save: boolean) => {
+  /**
+   * Reaches the bridge, and saves the backend once it answers when `save` is set. A scanned code
+   * passes its fields in, as the form's state hasn't caught up with them yet.
+   */
+  const connect = async (save: boolean, fields = { url, altUrls, token, bridgeId: pairedBridge }) => {
     setBusy(save ? 'save' : 'test');
     setStatus(null);
     try {
       let parsed: URL;
       try {
-        parsed = new URL(url.trim());
+        parsed = new URL(fields.url.trim());
       } catch {
         throw new Error('Enter the bridge address, such as http://192.168.1.10:8787.');
       }
@@ -71,36 +81,39 @@ export default function BackendScreen() {
         id: existing?.id ?? 'test',
         name: name.trim(),
         kind: existing?.kind ?? 'hermes',
-        baseUrl: url.trim().replace(/\/+$/, ''),
-        altBaseUrls: altUrls.map((value) => value.trim()).filter(Boolean),
-        bridgeId: existing?.bridgeId ?? '',
+        baseUrl: fields.url.trim().replace(/\/+$/, ''),
+        altBaseUrls: fields.altUrls.map((value) => value.trim()).filter(Boolean),
+        bridgeId: existing?.bridgeId || fields.bridgeId,
         models: [],
         model,
       };
       bridgeAddresses(draft);
-      const info = await new RemoteAdapter(draft, token.trim()).info();
+      const info = await new RemoteAdapter(draft, fields.token.trim()).info();
       if (!info.models.length) throw new Error('The backend has no available models. Configure its model provider on the host first.');
       const chosen = info.models.includes(model) ? model : (info.models.find((m) => !hidden.includes(m)) ?? info.models[0]);
       setModels(info.models);
       setModel(chosen);
       if (save) {
+        // Adding a bridge that's already saved updates that backend, so its chats carry on.
+        const previous = existing ?? useBackends.getState().remotes.find((b) => b.bridgeId === info.bridgeId);
+        const keepHidden = existing ? hidden : [...new Set([...(previous?.hiddenModels ?? []), ...hidden])];
         const backend: RemoteBackend = {
           ...draft,
-          id: existing?.id ?? `remote_${info.bridgeId}`,
-          name: draft.name || KIND_LABELS[info.kind],
+          id: previous?.id ?? `remote_${info.bridgeId}`,
+          name: draft.name || previous?.name || KIND_LABELS[info.kind],
           kind: info.kind,
           bridgeId: info.bridgeId,
           models: info.models,
           model: chosen,
           modelOptions: info.modelOptions,
           modelSwitching: info.modelSwitching,
-          efforts: existing?.efforts,
+          efforts: previous?.efforts,
           // The model for new chats is never hidden.
-          hiddenModels: hidden.filter((m) => m !== chosen && info.models.includes(m)),
+          hiddenModels: keepHidden.filter((m) => m !== chosen && info.models.includes(m)),
         };
-        await apiKeys.set(`bridge_${backend.id}`, token.trim());
+        await apiKeys.set(`bridge_${backend.id}`, fields.token.trim());
         useBackends.getState().save(backend);
-        router.back();
+        close();
         return;
       }
       setStatus({
@@ -116,6 +129,45 @@ export default function BackendScreen() {
     }
   };
 
+  /** Fills the form from a pairing code and tests it, so Save is all that's left. */
+  const applyPairing = (pairing: Pairing) => {
+    if (existing?.bridgeId && existing.bridgeId !== pairing.bridgeId) {
+      setStatus({ ok: false, text: 'This code is for a different bridge. Add it as a new backend instead.' });
+      return;
+    }
+    const saved = existing ?? useBackends.getState().remotes.find((b) => b.bridgeId === pairing.bridgeId);
+    // Addresses known before, such as a VPN route, stay on as alternatives.
+    const earlier = existing || !saved ? [url, ...altUrls] : [saved.baseUrl, ...(saved.altBaseUrls ?? [])];
+    const fields = {
+      url: pairing.urls[0],
+      altUrls: [...new Set([...pairing.urls.slice(1), ...earlier.map((u) => u.trim().replace(/\/+$/, '')).filter(Boolean)])].filter(
+        (u) => u !== pairing.urls[0]
+      ),
+      token: pairing.token,
+      bridgeId: pairing.bridgeId,
+    };
+    setUrl(fields.url);
+    setAltUrls(fields.altUrls);
+    setToken(fields.token);
+    setPairedBridge(pairing.bridgeId);
+    if (!name.trim()) setName(saved?.name ?? pairing.name);
+    void connect(false, fields);
+  };
+
+  const opened = useRef(false);
+  useEffect(() => {
+    if (!pair || opened.current) return;
+    opened.current = true;
+    let pairing: Pairing | null = null;
+    try {
+      pairing = pairingFromParams(JSON.parse(pair));
+    } catch {}
+    if (pairing) applyPairing(pairing);
+    else setStatus({ ok: false, text: 'That link isn’t a complete Clanker pairing code. Scan the code on the host’s pairing page.' });
+    // Runs once, for the link the screen was opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pair]);
+
   const remove = () =>
     Alert.alert('Remove backend?', 'Chats and remote files remain. Adding the same bridge again reconnects its chats.', [
       { text: 'Cancel', style: 'cancel' },
@@ -124,7 +176,7 @@ export default function BackendScreen() {
         style: 'destructive',
         onPress: () => {
           useBackends.getState().remove(existing!.id);
-          router.back();
+          close();
         },
       },
     ]);
@@ -175,6 +227,20 @@ export default function BackendScreen() {
             ))}
           </View>
         </Disclosure>
+
+        <Pressable
+          onPress={() => setScanning(true)}
+          disabled={!!busy}
+          style={({ pressed }) => [styles.button, styles.scan, { backgroundColor: colors.sendBg }, pressed && { opacity: 0.7 }]}
+        >
+          <Feather name="camera" size={16} color={colors.sendFg} />
+          <Text style={{ color: colors.sendFg, fontSize: 16, fontWeight: '600' }}>Scan QR code</Text>
+        </Pressable>
+        <Text style={[styles.hint, { color: colors.textTertiary }]}>
+          {existing
+            ? 'Reconnect by scanning the code on the bridge’s pairing page. It fills in the current address and token.'
+            : 'Scan the code on the bridge’s pairing page to fill in the address and token, or enter them below.'}
+        </Text>
 
         <Label>Name</Label>
         <Input value={name} onChangeText={setName} placeholder="Hermes — Desktop" autoCapitalize="words" editable={!busy} />
@@ -270,7 +336,7 @@ export default function BackendScreen() {
               )}
               <Section
                 inset={16}
-                footer="Tap a model to start new chats with it, or its eye to hide it from the model picker. From the chat title, a chat can switch to another model from the provider it started with."
+                footer="Tap a model to start new chats with it, or its eye to hide it from the model picker. From the chat title, a chat can switch to another of these models."
               >
                 {visibleModels.slice(0, 200).map((m) => (
                   <ModelRow
@@ -305,6 +371,16 @@ export default function BackendScreen() {
           )}
         </Animated.View>
       </ScrollView>
+      <QrScanner
+        visible={scanning}
+        onClose={() => setScanning(false)}
+        hint="Point the camera at the QR code on the bridge’s pairing page."
+        onScan={(data) => {
+          const pairing = parsePairingLink(data);
+          if (pairing) applyPairing(pairing);
+          return !!pairing;
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -353,6 +429,9 @@ const ModelRow = memo(function ModelRow({
   );
 });
 
+// Opened from a pairing link, the screen may have nothing under it to go back to.
+const close = () => (router.canGoBack() ? router.back() : router.replace('/'));
+
 const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 60 },
   hint: { fontSize: 13, lineHeight: 18, marginTop: 6, marginHorizontal: 4 },
@@ -375,4 +454,5 @@ const styles = StyleSheet.create({
   },
   status: { flexDirection: 'row', gap: 10, borderRadius: 12, padding: 12, marginTop: 12 },
   delete: { borderWidth: 0, marginTop: 16 },
+  scan: { borderWidth: 0, marginTop: 20 },
 });
