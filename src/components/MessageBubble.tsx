@@ -1,6 +1,6 @@
 import Feather from '@expo/vector-icons/Feather';
 import * as Clipboard from 'expo-clipboard';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/lib/haptics';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { memo, useMemo, useState, type ReactNode } from 'react';

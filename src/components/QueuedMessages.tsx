@@ -1,5 +1,5 @@
 import Feather from '@expo/vector-icons/Feather';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/lib/haptics';
 import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 import Animated, { FadeIn, useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 import { useTheme } from '@/lib/theme';

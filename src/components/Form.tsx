@@ -1,5 +1,5 @@
 import Feather from '@expo/vector-icons/Feather';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/lib/haptics';
 import { Children, Fragment, isValidElement, useEffect, useState, type ReactNode } from 'react';
 import {
   Pressable,
