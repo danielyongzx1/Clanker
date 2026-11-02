@@ -8,6 +8,11 @@ export type ToolGroup = { title: string; footer?: string; tools: ToolEntry[] };
 
 export const LOCAL_TOOL_GROUPS: ToolGroup[] = [
   {
+    title: 'Questions',
+    footer: 'The reply waits until you answer, in the question or with a message.',
+    tools: [{ names: ['ask_user'], title: 'Ask you questions', detail: 'Clarify what you mean before going on' }],
+  },
+  {
     title: 'Files',
     footer: "Models only see files in Clanker's private workspace.",
     tools: [

@@ -28,6 +28,11 @@ export function lineChanges(name: string, input: Record<string, unknown>) {
 export function describeCall(name: string, input: Record<string, unknown>) {
   const p = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '');
   switch (name) {
+    case 'ask_user': {
+      const questions = Array.isArray(input.questions) ? (input.questions as { question?: unknown }[]) : [];
+      const first = typeof questions[0]?.question === 'string' ? questions[0].question : p('question');
+      return questions.length > 1 ? `Ask ${questions.length} questions` : first ? `Ask “${short(first)}”` : 'Ask a question';
+    }
     case 'read_file':
       return `Read ${p('path')}`;
     case 'write_file':

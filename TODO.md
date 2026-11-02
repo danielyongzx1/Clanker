@@ -1,4 +1,3 @@
-Add tool to ask user questions.
 Fix textbox lag when keyboard shows/hides.
 Make remote backend streaming faster.
 Add skill support.

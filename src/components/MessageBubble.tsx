@@ -18,6 +18,7 @@ import { brandOfModel, friendlyModelName } from '@/lib/modelNames';
 import { RemoteReply } from './RemoteReply';
 import { Markdown } from './Markdown';
 import { NestedScroll } from './NestedScroll';
+import { QuestionCard } from './QuestionCard';
 import { SiteChips, SourcesButton } from './Sources';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolCall } from './ToolCall';
@@ -246,9 +247,12 @@ function MessageBubbleInner({ conversationId, message, isLast, onRegenerate }: P
   // Gathered at the end of the turn, since the calls that made them fold away with the work.
   const made = streaming ? [] : filesOf(message.content);
 
+  // Questions waiting on the user show under the work rather than in it, where folding could hide them.
+  const asking = message.content.filter((p): p is ToolPart => p.type === 'tool' && p.name === 'ask_user' && p.status === 'running');
+
   const render = (seg: Segment, i: number) =>
     seg.kind === 'tool' ? (
-      <ToolCall key={seg.part.id} part={seg.part} />
+      !asking.includes(seg.part) && <ToolCall key={seg.part.id} part={seg.part} />
     ) : seg.kind === 'thought' ? (
       <Thoughts key={`r${i}`} text={seg.text} ms={seg.ms} live={streaming && seg === lastSeg} />
     ) : (
@@ -272,6 +276,9 @@ function MessageBubbleInner({ conversationId, message, isLast, onRegenerate }: P
       ) : (
         segments.map(render)
       )}
+      {asking.map((part) => (
+        <QuestionCard key={part.id} part={part} />
+      ))}
       {waiting && <ThinkingIndicator thinking expanded={false} toggleable={false} onToggle={() => {}} />}
       {!!made.length && <TurnFiles files={made} />}
       {!onRegenerate && <RemoteReply chatId={conversationId} reply={message.remote} reconnect={!!message.error} />}

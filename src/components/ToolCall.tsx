@@ -7,12 +7,14 @@ import { openWorkspaceFile, shareWorkspaceFile } from '@/lib/openFile';
 import type { ToolPart } from '@/lib/providers';
 import { fonts, useTheme } from '@/lib/theme';
 import { describeCall, lineChanges } from '@/lib/tools';
+import { questionsOf } from '@/lib/tools/ask';
 import type { Workspace } from '@/lib/workspace';
 import { useWorkspace } from '@/lib/useWorkspace';
 import { CodeBlock } from './CodeBlock';
 import { NestedScroll } from './NestedScroll';
 
 const ICONS: Record<string, keyof typeof Feather.glyphMap> = {
+  ask_user: 'help-circle',
   read_file: 'file-text',
   write_file: 'file-plus',
   edit_file: 'edit-3',
@@ -73,6 +75,18 @@ function CallInput({ part }: { part: ToolPart }) {
   const input = part.input;
   // While the model is still writing the call, the code shows its growing end.
   const live = part.status === 'writing';
+  if (part.name === 'ask_user') {
+    // An answered call's output repeats the questions with their answers.
+    if (part.status === 'done') return null;
+    const text = questionsOf(input)
+      .map((q) => [q.question, ...q.options.map((o) => `  · ${o.label}`)].join('\n'))
+      .join('\n\n');
+    return (
+      <Text selectable style={[styles.summary, { color: colors.textSecondary }]}>
+        {text}
+      </Text>
+    );
+  }
   if ((part.name === 'run_python' || part.name === 'run_javascript') && typeof input.code === 'string') {
     return <CodeBlock code={input.code} language={part.name === 'run_python' ? 'python' : 'javascript'} live={live} />;
   }

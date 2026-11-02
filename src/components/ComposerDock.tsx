@@ -78,6 +78,11 @@ export function ComposerDock({
   const [attachments, setAttachments] = useState<AttachmentPart[]>([]);
   const input = useRef<TextInputInstance>(null);
   const queue = useChats((s) => (conversationId ? s.conversations[conversationId]?.queue : undefined));
+  // A message sent while the reply waits on its questions answers them (see lib/chat submitMessage).
+  const asking = useChats((s) => {
+    const messages = conversationId ? s.conversations[conversationId]?.messages : undefined;
+    return !!messages?.[messages.length - 1]?.content.some((p) => p.type === 'tool' && p.name === 'ask_user' && p.status === 'running');
+  });
   const selectedBackend = useBackends((s) => s.selected);
   const backendId = useChats((s) => conversationId ? s.conversations[conversationId]?.backendId ?? 'local' : selectedBackend);
   const remote = backendId !== 'local';
@@ -196,7 +201,9 @@ export function ComposerDock({
             onChangeText={onChangeDraft}
             attachments={attachments}
             onChangeAttachments={setAttachments}
-            placeholder={streaming ? (followUp === 'steer' ? 'Steer the reply' : 'Queue a follow-up') : 'Ask anything'}
+            placeholder={
+              asking ? 'Answer the question' : streaming ? (followUp === 'steer' ? 'Steer the reply' : 'Queue a follow-up') : 'Ask anything'
+            }
             inputRef={input}
             streaming={streaming}
             onSend={onSend}

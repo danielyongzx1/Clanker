@@ -12,6 +12,7 @@ import type { ImagePart, Source, ToolCall, ToolSpec } from '../providers';
 import { releaseWorker, runScript, type ScriptResult } from '../runtime';
 import { uid } from '../storage';
 import { formatSize, type Workspace, type WorkspaceEntry } from '../workspace';
+import { askUser } from './ask';
 import type { ToolEntry } from './catalog';
 import { describeCall, lineChanges } from './describe';
 import { extractZipDocument, ZIP_DOCUMENT_EXT } from './documents';
@@ -929,6 +930,7 @@ const BACKGROUND_TOOLS = [runPython.name, runJavaScript.name, runShell.name];
 const MEMORY_TOOLS: Tool[] = [memorySave, memoryUpdate, memoryForget, searchChatsTool, readChatTool];
 
 const TOOLS: Tool[] = [
+  askUser,
   listFiles,
   readFile,
   searchFiles,

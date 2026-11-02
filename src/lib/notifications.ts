@@ -3,9 +3,9 @@ import { Notifications } from '@/lib/expoNotifications';
 import { messageText, useChats } from '@/store/chats';
 
 /**
- * A reply that finishes while the app is in the background (the user switched away, or the agent
- * is operating other apps) is announced with a notification. Tapping it opens the chat
- * (components/ReplyNotifications).
+ * A reply that finishes, or stops to ask the user something, while the app is in the background
+ * (the user switched away, or the agent is operating other apps) is announced with a notification.
+ * Tapping it opens the chat (components/ReplyNotifications).
  */
 
 const CHANNEL = 'replies';
@@ -26,7 +26,7 @@ function setUp(Notifications: typeof import('expo-notifications')) {
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync(CHANNEL, {
         name: 'Replies',
-        description: 'When a reply finishes while Clanker is in the background',
+        description: 'When a reply finishes or has a question while Clanker is in the background',
         importance: Notifications.AndroidImportance.HIGH,
       });
     }
@@ -54,23 +54,35 @@ function preview(text: string) {
   return line.length > BODY_MAX ? `${line.slice(0, BODY_MAX).trimEnd()}…` : line;
 }
 
-/** Announces the finished reply, unless the app is on screen. */
-export async function notifyReplyFinished(conversationId: string, messageId: string) {
-  if (!Notifications || AppState.currentState === 'active') return;
-  const conversation = useChats.getState().conversations[conversationId];
-  const message = conversation?.messages.find((m) => m.id === messageId);
-  if (!conversation || !message) return;
+async function notify(conversationId: string, title: string, body: string) {
+  if (!Notifications) return;
   await setUp(Notifications);
-  const body =
-    message.status === 'error' ? `Couldn't finish: ${message.error ?? 'something went wrong.'}` : preview(messageText(message)) || 'Done.';
   try {
     await Notifications.scheduleNotificationAsync({
-      // One per chat: a newer reply replaces the one before.
+      // One per chat: a newer one replaces the one before.
       identifier: conversationId,
-      content: { title: conversation.title, body, data: { conversationId } },
+      content: { title, body, data: { conversationId } },
       trigger: Platform.OS === 'android' ? { channelId: CHANNEL } : null,
     });
   } catch {
     // Permission denied, or not available in this build.
   }
+}
+
+/** Announces the finished reply, unless the app is on screen. */
+export async function notifyReplyFinished(conversationId: string, messageId: string) {
+  if (AppState.currentState === 'active') return;
+  const conversation = useChats.getState().conversations[conversationId];
+  const message = conversation?.messages.find((m) => m.id === messageId);
+  if (!conversation || !message) return;
+  const body =
+    message.status === 'error' ? `Couldn't finish: ${message.error ?? 'something went wrong.'}` : preview(messageText(message)) || 'Done.';
+  await notify(conversationId, conversation.title, body);
+}
+
+/** Announces that a reply is waiting on the user's answer, unless the app is on screen. */
+export async function notifyQuestion(conversationId: string, question: string) {
+  if (AppState.currentState === 'active') return;
+  const conversation = useChats.getState().conversations[conversationId];
+  if (conversation) await notify(conversationId, conversation.title, preview(question));
 }

@@ -11,6 +11,7 @@ import { getAdapter, ProviderError, type AttachmentPart, type Endpoint, type Too
 import { recordStep, stepStats } from './stats';
 import { apiKeys, uid } from './storage';
 import { availableTools, executeTool } from './tools';
+import { answerInWords } from './tools/ask';
 import { endPhoneRun, onPhoneStop } from './tools/phone';
 import { markObserved } from './tools/observe';
 import { isRemoteChat, remoteEffortForChat, sendRemoteMessage, sendRemoteQueue, stopRemoteChat } from './remote/chat';
@@ -122,6 +123,14 @@ export function submitMessage(conversationId: string | null, text: string, attac
     return conversationId;
   }
   if (!conversationId || !controllers.has(conversationId)) return sendMessage(conversationId, text, attachments);
+  // While the model waits on a question, a message answers it. Attachments can't go in the answer,
+  // so they follow it into the reply at the next step.
+  if (answerInWords(conversationId, text || '(No text; files the user attached follow.)')) {
+    if (attachments.length) {
+      useChats.getState().setQueue(conversationId, [...queueOf(conversationId), { id: uid(), text: '', attachments, steer: true }]);
+    }
+    return conversationId;
+  }
   const message: QueuedMessage = { id: uid(), text, attachments };
   if (useSettings.getState().followUp === 'steer') message.steer = true;
   useChats.getState().setQueue(conversationId, [...queueOf(conversationId), message]);
