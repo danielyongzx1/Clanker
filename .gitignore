@@ -3,6 +3,9 @@
 # dependencies
 node_modules/
 
+# Independently versioned plugin repository
+/standalone/
+
 # Expo
 .expo/
 dist/
@@ -39,3 +42,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Native module build output
+modules/*/android/build/

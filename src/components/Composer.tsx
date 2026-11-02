@@ -1,5 +1,5 @@
 import Feather from '@expo/vector-icons/Feather';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/lib/haptics';
 import { Image } from 'expo-image';
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type HostInstance, type TextInputInstance } from 'react-native';
@@ -8,6 +8,7 @@ import { AttachmentMenu, type AttachAction } from '@/components/AttachmentMenu';
 import { attachmentUri, deleteAttachment, pickFiles, pickImages } from '@/lib/attachments';
 import { ContextMeter, ContextPopover } from '@/components/ContextUsage';
 import { EffortMeter } from '@/components/EffortMeter';
+import { FileIcon } from '@/components/FileIcon';
 import type { AttachmentPart, FilePart, ImagePart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 import type { ContextUsage } from '@/lib/usage';
@@ -201,7 +202,7 @@ export function Composer({
             ))}
             {files.map((f, i) => (
               <View key={`${f.file ?? f.name}-${i}`} style={[styles.fileChip, { backgroundColor: colors.surface }]}>
-                <Feather name="paperclip" size={14} color={colors.textSecondary} />
+                <FileIcon name={f.name} uri={f.file ? attachmentUri(f.file) : undefined} size={26} />
                 <Text numberOfLines={1} style={[styles.fileChipName, { color: colors.text }]}>
                   {f.name}
                 </Text>
@@ -313,7 +314,8 @@ const styles = StyleSheet.create({
     height: 40,
     maxWidth: 180,
     borderRadius: 20,
-    paddingHorizontal: 14,
+    paddingLeft: 7,
+    paddingRight: 14,
   },
   fileChipName: { fontSize: 14, flexShrink: 1 },
   loading: { alignItems: 'center', justifyContent: 'center' },

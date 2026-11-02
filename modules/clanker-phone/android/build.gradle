@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.clankerphone'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.clankerphone"
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+}
+
+dependencies {
+  implementation 'com.facebook.react:react-android'
+  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+}

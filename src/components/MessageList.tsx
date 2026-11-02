@@ -10,7 +10,7 @@ const NO_MESSAGES: Message[] = [];
 
 type Props = {
   conversationId: string;
-  onRegenerate: (messageId: string) => void;
+  onRegenerate?: (messageId: string) => void;
   // Heights of the header and composer floating over the list, so content rests clear of them.
   // The composer's is a shared value: it follows the box's expand animation on the UI thread.
   topInset: number;
@@ -40,7 +40,7 @@ export function MessageList({ conversationId, onRegenerate, topInset, bottomInse
         data={data}
         keyExtractor={(m) => m.id}
         renderItem={({ item }) => (
-          <MessageBubble message={item} isLast={item.id === lastAssistantId} onRegenerate={onRegenerate} />
+          <MessageBubble conversationId={conversationId} message={item} isLast={item.id === lastAssistantId} onRegenerate={onRegenerate} />
         )}
         // Inverted flips the content, so its top padding and header show at the bottom and vice
         // versa. The header is the composer's room, sized without re-rendering the list.
@@ -48,6 +48,9 @@ export function MessageList({ conversationId, onRegenerate, topInset, bottomInse
         contentContainerStyle={{ paddingTop: 12, paddingBottom: 12 + topInset }}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
+        // Selectable text takes focus when tapped or held, and on Android the list then scrolls
+        // the focused text into view, which in an inverted list lands somewhere else entirely.
+        scrollsChildToFocus={false}
         onScroll={onScroll}
         scrollEventThrottle={64}
       />

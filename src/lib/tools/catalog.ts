@@ -35,6 +35,27 @@ export const LOCAL_TOOL_GROUPS: ToolGroup[] = [
     ],
   },
   {
+    title: 'Phone',
+    footer:
+      "Needs Clanker phone control turned on in Android's accessibility settings. What is on screen is sent to the model; a Stop button stays up while it works.",
+    tools: [
+      {
+        names: [
+          'phone_screen',
+          'phone_tap',
+          'phone_type',
+          'phone_scroll',
+          'phone_swipe',
+          'phone_press',
+          'phone_open_app',
+          'phone_list_apps',
+        ],
+        title: 'Phone control',
+        detail: 'Open apps, read the screen, tap, type and scroll',
+      },
+    ],
+  },
+  {
     title: 'Long chats',
     footer: 'Lets the model summarise older parts of a long chat to stay within its context budget. Past the auto-compression threshold, the app compresses history on its own either way.',
     tools: [

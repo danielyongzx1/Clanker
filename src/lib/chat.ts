@@ -4,12 +4,16 @@ import { useUI } from '@/store/ui';
 import { deleteAttachment, readAttachmentBase64, saveToWorkspace } from './attachments';
 import { autoCompress, buildWire, historyOf, historyTokens, unitsOf } from './context';
 import { ensureMemoryBase, extractMemories, memoryOn } from './memory';
+import { askToNotify, notifyReplyFinished } from './notifications';
 import { workspaceFor } from './projects';
 import { parsePartialJson } from './partialJson';
 import { getAdapter, ProviderError, type AttachmentPart, type Endpoint, type ToolCallDraft, type ToolPart } from './providers';
+import { recordStep, stepStats } from './stats';
 import { apiKeys, uid } from './storage';
 import { availableTools, executeTool } from './tools';
+import { endPhoneRun, onPhoneStop } from './tools/phone';
 import { markObserved } from './tools/observe';
+import { isRemoteChat, remoteEffortForChat, sendRemoteMessage, sendRemoteQueue, stopRemoteChat } from './remote/chat';
 import { systemPrompt, writeContextNote } from './tools/prompt';
 
 const controllers = new Map<string, AbortController>();
@@ -66,6 +70,7 @@ function postUserMessage(id: string, text: string, attachments: AttachmentPart[]
 
 /** Starts a new conversation (when `conversationId` is null) or continues one, and streams the reply. */
 export function sendMessage(conversationId: string | null, text: string, attachments: AttachmentPart[]) {
+  if (isRemoteChat(conversationId)) return sendRemoteMessage(conversationId, text, attachments);
   const { active } = useSettings.getState();
   if (!active) throw new Error('Add an endpoint in Settings to start chatting.');
   const chats = useChats.getState();
@@ -87,6 +92,7 @@ export function sendMessage(conversationId: string | null, text: string, attachm
 
 /** Drops `messageId` (an assistant reply) and everything after it, then asks the model again. */
 export function regenerate(conversationId: string, messageId: string) {
+  if (isRemoteChat(conversationId)) return;
   const { active } = useSettings.getState();
   const chats = useChats.getState();
   if (active) chats.setModel(conversationId, active.endpointId, active.model);
@@ -95,8 +101,12 @@ export function regenerate(conversationId: string, messageId: string) {
 }
 
 export function stopStreaming(conversationId: string) {
+  if (isRemoteChat(conversationId)) return stopRemoteChat(conversationId);
   controllers.get(conversationId)?.abort();
 }
+
+// The Stop button on the phone-control overlay stops the replies operating the phone.
+onPhoneStop(stopStreaming);
 
 const queueOf = (conversationId: string) => useChats.getState().conversations[conversationId]?.queue ?? [];
 
@@ -105,6 +115,12 @@ const queueOf = (conversationId: string) => useChats.getState().conversations[co
  * Settings choose, to steer the reply at its next step.
  */
 export function submitMessage(conversationId: string | null, text: string, attachments: AttachmentPart[]) {
+  if (conversationId && isRemoteChat(conversationId)) {
+    const chat = useChats.getState().conversations[conversationId];
+    if (!chat?.remote?.submissionId) return sendRemoteMessage(conversationId, text, attachments);
+    useChats.getState().setQueue(conversationId, [...(chat.queue ?? []), { id: uid(), text, attachments, remoteEffort: remoteEffortForChat(conversationId) }]);
+    return conversationId;
+  }
   if (!conversationId || !controllers.has(conversationId)) return sendMessage(conversationId, text, attachments);
   const message: QueuedMessage = { id: uid(), text, attachments };
   if (useSettings.getState().followUp === 'steer') message.steer = true;
@@ -128,6 +144,7 @@ function sendFromQueue(conversationId: string, queuedId?: string) {
 
 /** Steers the running reply with a queued message, or sends it right away when nothing is running. */
 export function sendQueuedNow(conversationId: string, queuedId: string) {
+  if (isRemoteChat(conversationId)) return sendRemoteQueue(conversationId, queuedId);
   if (!controllers.has(conversationId)) return sendFromQueue(conversationId, queuedId);
   useChats
     .getState()
@@ -172,6 +189,7 @@ async function runCompletion(id: string) {
 
   const controller = new AbortController();
   controllers.set(id, controller);
+  void askToNotify();
   let buffer = '';
   let reasoningBuffer = '';
   // Tool calls the model is still writing in the current response, by stream index, with the id
@@ -274,6 +292,14 @@ async function runCompletion(id: string) {
       // stays there, so the system prompt and earlier history are a stable, cacheable prefix.
       if (tools) writeContextNote({ conversationId: id, replyId, budget });
       let streamed = false;
+      // For timing the response's decode where the server doesn't: from its first chunk to its end.
+      let firstChunkAt = 0;
+      let streamedChars = 0;
+      const chunk = (chars: number) => {
+        streamed = true;
+        firstChunkAt ||= Date.now();
+        streamedChars += chars;
+      };
       let result;
       for (let attempt = 0; ; attempt++) {
         try {
@@ -287,19 +313,19 @@ async function runCompletion(id: string) {
             messages: await buildMessages(),
             signal: controller.signal,
             onToken: (token) => {
-              streamed = true;
+              chunk(token.length);
               markThoughtDone();
               buffer += token;
               timer ??= setTimeout(flush, FLUSH_MS);
             },
             onReasoning: (token) => {
-              streamed = true;
+              chunk(token.length);
               thinkingStartedAt ||= Date.now();
               reasoningBuffer += token;
               timer ??= setTimeout(flush, FLUSH_MS);
             },
             onToolDraft: (draft) => {
-              streamed = true;
+              chunk(0);
               markThoughtDone();
               const partId =
                 drafts.get(draft.index)?.partId ?? (takenIds().has(draft.id) ? `${draft.id}_${uid()}` : draft.id);
@@ -322,6 +348,9 @@ async function runCompletion(id: string) {
       }
       flush();
       markThoughtDone();
+      const toolChars = result.toolCalls.reduce((n, c) => n + c.name.length + JSON.stringify(c.input).length, 0);
+      const stats = stepStats(result.usage, streamedChars + toolChars, firstChunkAt ? Date.now() - firstChunkAt : 0);
+      if (stats) recordStep(id, replyId, stats);
       if (!tools || !result.toolCalls.length) {
         settleDrafts([]);
         // Rounds count per reply, and a steered one starts over.
@@ -387,18 +416,20 @@ async function runCompletion(id: string) {
     } else {
       const error = e instanceof Error ? e.message : String(e);
       useChats.getState().updateMessage(id, replyId, { status: 'error', error, content });
+      void notifyReplyFinished(id, replyId);
       return;
     }
   } finally {
     if (timer) clearTimeout(timer);
     controllers.delete(id);
+    endPhoneRun(id, controller.signal.aborted);
     // Steers that never reached a step boundary wait in the queue like any other message.
     const queue = queueOf(id);
     if (queue.some((m) => m.steer)) useChats.getState().setQueue(id, queue.map(({ steer: _, ...m }) => m));
   }
 
   const latest = useChats.getState().conversations[id];
-  if (latest && !latest.titled) void generateTitle(id, endpoint, apiKey, conversation.model);
+  if (latest && !latest.titled && useSettings.getState().titleGeneration) void generateTitle(id, endpoint, apiKey, conversation.model);
   // A reply where the model managed memory itself needs no second pass, nor does a stopped one.
   const managed = reply()?.content.some((p) => p.type === 'tool' && p.name.startsWith('memory_'));
   if (latest && !controller.signal.aborted && !managed && memoryOn(id) && useSettings.getState().memoryAuto) {
@@ -412,6 +443,8 @@ async function runCompletion(id: string) {
     } catch {
       // No model to send with; the message stays queued.
     }
+    // Unless a queued message went out as the next turn, the agent is done.
+    if (!controllers.has(id)) void notifyReplyFinished(id, replyId);
   }
 }
 

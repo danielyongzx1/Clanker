@@ -1,7 +1,7 @@
 import { guessEfforts } from './effort';
 import { getJson, joinUrl, readSSE, request } from './http';
 import { uid } from '../storage';
-import type { Endpoint, ProviderAdapter, ToolCall, WireMessage } from './types';
+import type { Endpoint, ProviderAdapter, StreamUsage, ToolCall, WireMessage } from './types';
 
 function headers(endpoint: Endpoint, apiKey?: string) {
   return { ...(apiKey ? { 'x-goog-api-key': apiKey } : {}), ...endpoint.headers };
@@ -57,9 +57,19 @@ export const gemini: ProviderAdapter = {
       signal,
     });
     const toolCalls: ToolCall[] = [];
+    let usage: StreamUsage | undefined;
     for await (const data of readSSE(res)) {
       const json = JSON.parse(data);
       if (json.error) throw new Error(json.error.message ?? 'Stream error');
+      // Every chunk carries the counts so far; the last one has the totals.
+      const u = json.usageMetadata;
+      if (u) {
+        usage = {
+          output: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0),
+          input: u.promptTokenCount,
+          cached: u.cachedContentTokenCount ?? 0,
+        };
+      }
       for (const part of json.candidates?.[0]?.content?.parts ?? []) {
         if (part.functionCall) {
           const call = {
@@ -78,7 +88,7 @@ export const gemini: ProviderAdapter = {
         else onToken(part.text);
       }
     }
-    return { toolCalls };
+    return { toolCalls, usage };
   },
 };
 

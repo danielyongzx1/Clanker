@@ -1,7 +1,9 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Section, ToggleRow } from '@/components/Form';
+import { ActivityAction, startActivityAsync } from 'expo-intent-launcher';
+import { useEffect, useState } from 'react';
+import { AppState, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Row, Section, ToggleRow } from '@/components/Form';
 import { Slider } from '@/components/Slider';
-import { shellAvailable } from '@/lib/tools';
+import { entryAvailable, phoneAvailable, phoneSupported } from '@/lib/tools';
 import { entryOn, LOCAL_TOOL_GROUPS } from '@/lib/tools/catalog';
 import { useTheme } from '@/lib/theme';
 import { useSettings } from '@/store/settings';
@@ -10,7 +12,18 @@ import { useSettings } from '@/store/settings';
 const DEFAULT_LIMIT = 50;
 const LIMIT = { min: 10, max: 200, step: 10 };
 
-/** Turns the agent's file, code and history tools on and off one at a time. */
+/** Whether Clanker's accessibility service is on, checked again whenever the app comes back to the front. */
+function usePhoneService() {
+  const [on, setOn] = useState(phoneAvailable);
+  useEffect(() => {
+    if (!phoneSupported()) return;
+    const sub = AppState.addEventListener('change', (state) => state === 'active' && setOn(phoneAvailable()));
+    return () => sub.remove();
+  }, []);
+  return on;
+}
+
+/** Turns the agent's file, code, phone and history tools on and off one at a time. */
 export default function ToolsScreen() {
   const { colors } = useTheme();
   const tools = useSettings((s) => s.tools);
@@ -18,7 +31,7 @@ export default function ToolsScreen() {
   const setToolsEnabled = useSettings((s) => s.setToolsEnabled);
   const maxSteps = useSettings((s) => s.maxSteps);
   const setMaxSteps = useSettings((s) => s.setMaxSteps);
-  const shell = shellAvailable();
+  const phoneOn = usePhoneService();
 
   return (
     <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={styles.content}>
@@ -48,10 +61,18 @@ export default function ToolsScreen() {
           </View>
         )}
       </Section>
-      {LOCAL_TOOL_GROUPS.map((group) => (
+      {LOCAL_TOOL_GROUPS.filter((group) => group.tools.some(entryAvailable)).map((group) => (
         <Section key={group.title} title={group.title} footer={group.footer} inset={16}>
+          {group.tools.some((entry) => entry.names.includes('phone_screen')) && (
+            <Row
+              icon="smartphone"
+              title="Accessibility service"
+              value={phoneOn ? 'On' : 'Off'}
+              onPress={() => void startActivityAsync(ActivityAction.ACCESSIBILITY_SETTINGS)}
+            />
+          )}
           {group.tools
-            .filter((entry) => shell || !entry.names.includes('run_shell'))
+            .filter(entryAvailable)
             .map((entry) => (
               <ToggleRow
                 key={entry.title}

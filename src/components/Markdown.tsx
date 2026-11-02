@@ -1,11 +1,16 @@
 import { cloneElement, Fragment, isValidElement, memo, useMemo, useState, type ReactNode } from 'react';
-import { StyleSheet, Text, View, type ImageStyle, type TextStyle, type ViewStyle } from 'react-native';
+import { Alert, StyleSheet, Text, View, type ImageStyle, type TextStyle, type ViewStyle } from 'react-native';
 import { MarkedLexer, Renderer, useMarkdown, type MarkedStyles } from 'react-native-marked';
+import { FileMentions } from '@/lib/fileMentions';
+import { INLINE_MATH, MATH_LANG, PENDING_MATH_LANG, prepareMath } from '@/lib/math';
+import { openWorkspaceFile } from '@/lib/openFile';
 import { fonts, useTheme, type Colors } from '@/lib/theme';
+import { useWorkspace } from '@/lib/useWorkspace';
 import { Chart, parseChart } from './Chart';
 import { CodeBlock } from './CodeBlock';
 import { ChatImage, ImageCards, parseImages } from './ImageCards';
 import { MarkdownTable } from './MarkdownTable';
+import { InlineMath, MathBlock } from './MathView';
 
 /** Shown in place of a chart or image block whose JSON is still streaming in. */
 function Pending({ label }: { label: string }) {
@@ -19,8 +24,19 @@ function Pending({ label }: { label: string }) {
 
 class ChatRenderer extends Renderer {
   /** True while the text is still streaming, so an unfinished visual block is expected rather than broken. */
-  constructor(private live: boolean) {
+  constructor(
+    private live: boolean,
+    /** Finds the workspace files the text names, which then open on a tap; null without a workspace. */
+    private mentions: FileMentions | null,
+    private linkColor: string
+  ) {
     super();
+  }
+
+  private open(path: string) {
+    const ws = this.mentions?.ws;
+    if (!ws) return;
+    openWorkspaceFile(ws, path).catch((e) => Alert.alert('Could not open file', e instanceof Error ? e.message : String(e)));
   }
 
   private keys = 0;
@@ -46,6 +62,8 @@ class ChatRenderer extends Renderer {
     const text = this.live ? raw.replace(/\n`{1,2}$/, '') : raw;
     // Charts and cards take the block's text rather than the parsed object, so their memo holds
     // while text after them streams in.
+    if (lang === MATH_LANG) return <MathBlock key={this.getKey()} tex={text} />;
+    if (lang === PENDING_MATH_LANG) return <Pending key={this.getKey()} label="Writing math…" />;
     if (lang === 'chart') {
       if (parseChart(text)) return <Chart key={this.getKey()} source={text} />;
       if (this.live) return <Pending key={this.getKey()} label="Drawing chart…" />;
@@ -58,6 +76,52 @@ class ChatRenderer extends Renderer {
 
   image(uri: string, alt?: string, _style?: ImageStyle, title?: string): ReactNode {
     return <ChatImage key={this.getKey()} src={uri} alt={alt} title={title} />;
+  }
+
+  codespan(text: string, styles?: TextStyle): ReactNode {
+    if (text.startsWith(INLINE_MATH)) return <InlineMath key={this.getKey()} tex={text.slice(INLINE_MATH.length)} />;
+    const path = this.mentions?.resolve(text);
+    if (!path) return super.codespan(text, styles);
+    return (
+      <Text
+        selectable
+        key={this.getKey()}
+        accessibilityRole="link"
+        onPress={() => this.open(path)}
+        style={[styles, { color: this.linkColor }]}
+      >
+        {text}
+      </Text>
+    );
+  }
+
+  text(text: string | ReactNode[], styles?: TextStyle): ReactNode {
+    const parts = typeof text === 'string' && this.mentions ? this.mentions.split(text) : null;
+    if (!parts || parts.length < 2) return super.text(text, styles);
+    return (
+      <Text selectable key={this.getKey()} style={styles}>
+        {parts.map((part, i) =>
+          typeof part === 'string' ? (
+            part
+          ) : (
+            <Text key={i} accessibilityRole="link" onPress={() => this.open(part.path)} style={{ color: this.linkColor }}>
+              {part.text}
+            </Text>
+          )
+        )}
+      </Text>
+    );
+  }
+
+  link(children: string | ReactNode[], href: string, styles?: TextStyle, title?: string): ReactNode {
+    // A link to a workspace file ("[report](report.pdf)") opens it rather than going to the web.
+    const path = /^(https?|mailto|tel):/i.test(href) ? null : this.mentions?.resolve(href);
+    if (!path) return super.link(children, href, styles, title);
+    return (
+      <Text selectable key={this.getKey()} accessibilityRole="link" onPress={() => this.open(path)} style={styles}>
+        {children}
+      </Text>
+    );
   }
 
   table(header: ReactNode[][], rows: ReactNode[][][]): ReactNode {
@@ -136,7 +200,9 @@ const MarkdownBlock = memo(function MarkdownBlock({ value, live }: { value: stri
     () => ({ colors: { text: colors.text, link: colors.link, code: colors.codeBg, border: colors.border } }),
     [colors]
   );
-  const renderer = useMemo(() => new ChatRenderer(live), [live]);
+  const ws = useWorkspace();
+  // Made again when the reply finishes (live turns off), so files written while it streamed are found.
+  const renderer = useMemo(() => new ChatRenderer(live, ws && new FileMentions(ws), colors.link), [live, ws, colors.link]);
   // useMarkdown parses during this render whenever the text changed.
   renderer.reset();
   const elements = useMarkdown(value, { colorScheme: scheme, styles, theme, renderer });
@@ -151,7 +217,8 @@ const MarkdownBlock = memo(function MarkdownBlock({ value, live }: { value: stri
   );
 });
 
-function MarkdownInner({ value, live = false }: { value: string; live?: boolean }) {
+function MarkdownInner({ value: raw, live = false }: { value: string; live?: boolean }) {
+  const value = useMemo(() => prepareMath(raw, live), [raw, live]);
   const [split, setSplit] = useState<Split>(() => ({ text: value, blocks: splitBlocks(value, null) }));
   let blocks = split.blocks;
   if (split.text !== value) {

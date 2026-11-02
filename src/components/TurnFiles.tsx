@@ -1,4 +1,3 @@
-import Feather from '@expo/vector-icons/Feather';
 import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { openWorkspaceFile, shareWorkspaceFile } from '@/lib/openFile';
@@ -6,7 +5,7 @@ import type { ContentPart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 import { useWorkspace } from '@/lib/useWorkspace';
 import { formatSize, type Workspace } from '@/lib/workspace';
-import { iconFor } from './FileList';
+import { FileIcon } from './FileIcon';
 
 // A script or shell command can touch many files; past this many the rest wait behind a toggle.
 const SHOWN = 4;
@@ -16,6 +15,14 @@ export function filesOf(content: ContentPart[]) {
   const seen = new Set<string>();
   for (const part of content) if (part.type === 'tool') for (const path of part.files ?? []) seen.add(path);
   return [...seen];
+}
+
+function uriOf(ws: Workspace | null, path: string) {
+  try {
+    return ws?.fileAt(path).uri;
+  } catch {
+    return undefined;
+  }
 }
 
 function detail(ws: Workspace | null, path: string) {
@@ -71,9 +78,7 @@ export function TurnFiles({ files }: { files: string[] }) {
               pressed && { backgroundColor: colors.surfaceHover },
             ]}
           >
-            <View style={[styles.tile, { backgroundColor: colors.accent }]}>
-              <Feather name={iconFor(path)} size={20} color={colors.accentFg} />
-            </View>
+            <FileIcon name={name} uri={uriOf(ws, path)} size={44} />
             <View style={styles.text}>
               <Text numberOfLines={1} style={[styles.name, { color: colors.text }]}>
                 {name}
@@ -106,7 +111,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     padding: 10,
   },
-  tile: { width: 44, height: 44, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   text: { flex: 1, gap: 2 },
   name: { fontSize: 16, fontWeight: '600' },
   detail: { fontSize: 13 },

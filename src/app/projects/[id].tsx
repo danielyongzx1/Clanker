@@ -3,8 +3,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
-import { useSharedValue } from 'react-native-reanimated';
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useChatMenu } from '@/components/ChatMenu';
 import { reportSendError } from '@/components/ChatScreen';
 import { ComposerDock } from '@/components/ComposerDock';
@@ -55,6 +55,9 @@ export default function ProjectScreen() {
   const [draft, setDraft] = useState('');
   const [composerBase, setComposerBase] = useState(0);
   const composerProgress = useSharedValue(0);
+  // The keyboard's height, negative while it's up.
+  const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
+  const keyboardPad = useAnimatedStyle(() => ({ paddingBottom: -keyboardHeight.value }));
 
   // Starts the chat here and shows it streaming, over this page.
   const send = useCallback(
@@ -110,10 +113,11 @@ export default function ProjectScreen() {
       />
 
       {/* With KeyboardProvider mounted the window doesn't resize for the keyboard; this box pads
-          for it, and the composer floats at its bottom as on the chat screen. Unlike the chat
-          screen it sits under a native header, so it measures where it is on screen: otherwise it
-          assumes the top and falls short by the header's height. */}
-      <KeyboardAvoidingView style={styles.container} behavior="padding" automaticOffset>
+          for it, and the composer floats at its bottom as on the chat screen. The box runs to the
+          bottom of the screen, so the keyboard's height is the padding it needs. The avoiding view
+          measured its place on screen instead to allow for the header, and in release builds it
+          came up short, leaving the composer partly under the keyboard. */}
+      <Animated.View style={[styles.container, keyboardPad]}>
         <View style={styles.container}>
           <View style={styles.tabs} accessibilityRole="tablist">
             {TABS.map((t) => (
@@ -219,7 +223,7 @@ export default function ProjectScreen() {
             onBaseHeight={setComposerBase}
           />
         </View>
-      </KeyboardAvoidingView>
+      </Animated.View>
 
       {menu}
       {chatMenu}

@@ -148,10 +148,23 @@ export type ToolSpec = {
   parameters: Record<string, unknown>;
 };
 
+/** Token counts the server reported for a response, as far as it reports them. */
+export type StreamUsage = {
+  /** Tokens the model generated, thinking included. */
+  output?: number;
+  /** Prompt tokens, cached ones included. */
+  input?: number;
+  /** Prompt tokens read from the server's cache. */
+  cached?: number;
+  /** How long the server took to generate `output`, in ms. */
+  decodeMs?: number;
+};
+
 export type StreamResult = {
   toolCalls: ToolCall[];
   /** Anthropic thinking blocks (with signatures) from this response, to replay with its tool calls. */
   thinking?: unknown[];
+  usage?: StreamUsage;
 };
 
 export interface Endpoint {

@@ -1,7 +1,7 @@
 import { guessEfforts } from './effort';
 import { getJson, joinUrl, readLines, request } from './http';
 import { uid } from '../storage';
-import type { Endpoint, ProviderAdapter, ToolCall, WireMessage } from './types';
+import type { Endpoint, ProviderAdapter, StreamUsage, ToolCall, WireMessage } from './types';
 
 function headers(endpoint: Endpoint, apiKey?: string) {
   return { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}), ...endpoint.headers };
@@ -52,6 +52,7 @@ export const ollama: ProviderAdapter = {
     });
     // Ollama streams newline-delimited JSON rather than SSE.
     const toolCalls: ToolCall[] = [];
+    let usage: StreamUsage | undefined;
     for await (const line of readLines(res)) {
       if (!line.trim()) continue;
       const json = JSON.parse(line);
@@ -70,9 +71,15 @@ export const ollama: ProviderAdapter = {
         onToolDraft?.({ index: toolCalls.length, id: call.id, name: call.name, args: JSON.stringify(call.input) });
         toolCalls.push(call);
       }
-      if (json.done) break;
+      if (json.done) {
+        // Durations are in nanoseconds. Ollama doesn't say how much of the prompt it had cached.
+        if (typeof json.eval_count === 'number') {
+          usage = { output: json.eval_count, ...(json.eval_duration ? { decodeMs: json.eval_duration / 1e6 } : {}) };
+        }
+        break;
+      }
     }
-    return { toolCalls };
+    return { toolCalls, usage };
   },
 };
 

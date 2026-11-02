@@ -22,6 +22,9 @@ function flush() {
   pending.clear();
 }
 
+/** Persist a rate-limit reservation before its network request can start. */
+export { flush as flushJsonStorage };
+
 // The app may be killed once it leaves the foreground, so waiting writes go out then.
 AppState.addEventListener('change', (state) => {
   if (state !== 'active') flush();

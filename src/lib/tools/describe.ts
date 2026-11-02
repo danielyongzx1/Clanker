@@ -77,6 +77,26 @@ export function describeCall(name: string, input: Record<string, unknown>) {
       return `Search chats “${p('query')}”`;
     case 'read_chat':
       return 'Read an earlier chat';
+    case 'phone_screen':
+      return input.screenshot ? 'Take a screenshot' : 'Look at the screen';
+    case 'phone_tap': {
+      const verb = input.long_press ? 'Long-press' : 'Tap';
+      return input.element != null ? `${verb} [${input.element}]` : `${verb} (${input.x ?? '?'}, ${input.y ?? '?'})`;
+    }
+    case 'phone_type':
+      return `Type “${short(p('text'))}”`;
+    case 'phone_scroll':
+      return `Scroll ${p('direction') || 'down'}`;
+    case 'phone_swipe':
+      return 'Swipe';
+    case 'phone_press': {
+      const key = p('key').replace('_', ' ');
+      return key === 'notifications' || key === 'quick settings' ? `Open ${key}` : `Press ${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+    }
+    case 'phone_open_app':
+      return `Open ${p('app')}`;
+    case 'phone_list_apps':
+      return 'List apps';
     default:
       return name;
   }

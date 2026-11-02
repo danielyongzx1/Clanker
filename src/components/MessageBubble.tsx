@@ -1,34 +1,33 @@
 import Feather from '@expo/vector-icons/Feather';
 import * as Clipboard from 'expo-clipboard';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/lib/haptics';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { memo, useMemo, useRef, useState, type ReactNode } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  type ScrollViewInstance,
-} from 'react-native';
+import { memo, useMemo, useState, type ReactNode } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { attachmentUri } from '@/lib/attachments';
 import type { ContentPart, FilePart, ImagePart, ToolPart } from '@/lib/providers';
 import { sitesOf, sourcesOf } from '@/lib/sources';
+import { formatStats } from '@/lib/stats';
 import { useTheme } from '@/lib/theme';
 import { messageText, type Message } from '@/store/chats';
+import { useSettings } from '@/store/settings';
+import { BrandIcon } from './BrandIcon';
+import { FileIcon } from './FileIcon';
+import { brandOfModel, friendlyModelName } from '@/lib/modelNames';
+import { RemoteReply } from './RemoteReply';
 import { Markdown } from './Markdown';
+import { NestedScroll } from './NestedScroll';
 import { SiteChips, SourcesButton } from './Sources';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolCall } from './ToolCall';
 import { filesOf, TurnFiles } from './TurnFiles';
 
 type Props = {
+  conversationId: string;
   message: Message;
   isLast: boolean;
-  onRegenerate: (messageId: string) => void;
+  onRegenerate?: (messageId: string) => void;
 };
 
 function Files({ files, align }: { files: FilePart[]; align: 'flex-end' | 'flex-start' }) {
@@ -41,7 +40,7 @@ function Files({ files, align }: { files: FilePart[]; align: 'flex-end' | 'flex-
           key={`${f.file ?? f.name}-${i}`}
           style={[styles.fileChip, { backgroundColor: colors.surface, borderColor: colors.border }]}
         >
-          <Feather name="paperclip" size={15} color={colors.textSecondary} />
+          <FileIcon name={f.name} uri={f.file ? attachmentUri(f.file) : undefined} size={28} />
           <Text numberOfLines={1} style={[styles.fileName, { color: colors.text }]}>
             {f.name}
           </Text>
@@ -168,13 +167,6 @@ function Thoughts({ text, ms, live }: { text: string; ms?: number; live: boolean
   // Expanded while it streams; a tap pins the choice either way.
   const [openOverride, setOpenOverride] = useState<boolean | null>(null);
   const open = openOverride ?? live;
-  // The box is capped in height, so while thoughts stream it follows their end, until the user
-  // drags it to read back; dragging back down to the end picks the following up again.
-  const scroll = useRef<ScrollViewInstance>(null);
-  const follow = useRef(true);
-  const settle = ({ nativeEvent: e }: NativeSyntheticEvent<NativeScrollEvent>) => {
-    follow.current = e.contentOffset.y + e.layoutMeasurement.height >= e.contentSize.height - 24;
-  };
   return (
     <>
       <ThinkingIndicator
@@ -185,29 +177,26 @@ function Thoughts({ text, ms, live }: { text: string; ms?: number; live: boolean
         onToggle={() => setOpenOverride(!open)}
       />
       {open && (
-        <ScrollView
-          ref={scroll}
-          style={styles.thoughts}
-          nestedScrollEnabled
-          onContentSizeChange={() => live && follow.current && scroll.current?.scrollToEnd({ animated: false })}
-          onScrollBeginDrag={() => (follow.current = false)}
-          onScrollEndDrag={settle}
-          onMomentumScrollEnd={settle}
-        >
+        // Capped in height, so while thoughts stream it follows their end until the user drags back to read.
+        <NestedScroll style={styles.thoughts} follow={live}>
           <View style={[styles.thoughtsInner, { borderLeftColor: colors.border }]}>
             <Text selectable style={[styles.thoughtsText, { color: colors.textSecondary }]}>
               {text}
             </Text>
           </View>
-        </ScrollView>
+        </NestedScroll>
       )}
     </>
   );
 }
 
-function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
+function MessageBubbleInner({ conversationId, message, isLast, onRegenerate }: Props) {
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
+  const showSpeed = useSettings((s) => s.decodeSpeed);
+  const showCache = useSettings((s) => s.cacheHits);
+  const friendly = useSettings((s) => s.friendlyModelNames);
+  const stats = formatStats(message.stats, { speed: showSpeed, cache: showCache });
   const text = messageText(message);
   const images = message.content.filter((p): p is ImagePart => p.type === 'image');
   const files = message.content.filter((p): p is FilePart => p.type === 'file');
@@ -285,18 +274,20 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
       )}
       {waiting && <ThinkingIndicator thinking expanded={false} toggleable={false} onToggle={() => {}} />}
       {!!made.length && <TurnFiles files={made} />}
+      {!onRegenerate && <RemoteReply chatId={conversationId} reply={message.remote} reconnect={!!message.error} />}
+      {message.error && message.status !== 'error' && <Text style={{ color: colors.textSecondary }}>{message.error}</Text>}
 
       {message.status === 'error' && (
         <View style={[styles.error, { backgroundColor: colors.dangerBg, borderColor: colors.danger }]}>
           <Text style={{ color: colors.danger, fontSize: 14, lineHeight: 20 }}>{message.error}</Text>
-          <Pressable
+          {onRegenerate && <Pressable
             onPress={() => onRegenerate(message.id)}
             style={[styles.retry, { borderColor: colors.danger }]}
             hitSlop={6}
           >
             <Feather name="rotate-ccw" size={14} color={colors.danger} />
             <Text style={{ color: colors.danger, fontWeight: '500' }}>Retry</Text>
-          </Pressable>
+          </Pressable>}
         </View>
       )}
 
@@ -307,16 +298,25 @@ function MessageBubbleInner({ message, isLast, onRegenerate }: Props) {
               <Feather name={copied ? 'check' : 'copy'} size={16} color={colors.textSecondary} />
             </Pressable>
           )}
-          {isLast && (
+          {isLast && onRegenerate && (
             <Pressable onPress={() => onRegenerate(message.id)} hitSlop={8} style={styles.action}>
               <Feather name="refresh-cw" size={16} color={colors.textSecondary} />
             </Pressable>
           )}
-          {!!message.model && (
-            <Text numberOfLines={1} style={[styles.model, { color: colors.textTertiary }]}>
-              {message.model}
-            </Text>
-          )}
+          {!!message.model &&
+            (friendly && message.model !== 'Clanker' ? (
+              <View style={styles.modelBrand}>
+                {brandOfModel(message.model) && <BrandIcon brand={brandOfModel(message.model)!} size={13} />}
+                <Text numberOfLines={1} style={[styles.model, { color: colors.textTertiary, marginLeft: brandOfModel(message.model) ? 0 : 6 }]}>
+                  {friendlyModelName(message.model) || message.model}
+                </Text>
+              </View>
+            ) : (
+              <Text numberOfLines={1} style={[styles.model, { color: colors.textTertiary }]}>
+                {message.model}
+              </Text>
+            ))}
+          {!!stats && <Text style={[styles.stats, { color: colors.textTertiary }]}>· {stats}</Text>}
           {!!sources.length && (
             <View style={styles.sources}>
               <SourcesButton sources={sources} />
@@ -355,8 +355,9 @@ const styles = StyleSheet.create({
     maxWidth: '82%',
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingLeft: 7,
+    paddingRight: 12,
+    paddingVertical: 7,
   },
   fileName: { fontSize: 15, flexShrink: 1 },
   assistantRow: { paddingHorizontal: 16, marginVertical: 6, gap: 2 },
@@ -365,7 +366,9 @@ const styles = StyleSheet.create({
   thoughtsText: { fontSize: 14, lineHeight: 21 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2, marginLeft: -6 },
   action: { padding: 6 },
+  modelBrand: { flexDirection: 'row', alignItems: 'center', gap: 5, marginLeft: 6, minWidth: 0, flexShrink: 1 },
   model: { fontSize: 12, marginLeft: 6, flexShrink: 1 },
+  stats: { fontSize: 12, fontVariant: ['tabular-nums'] },
   sources: { marginLeft: 'auto' },
   memory: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', maxWidth: '100%', paddingVertical: 4 },
   memoryText: { fontSize: 13, flexShrink: 1 },

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Clanker",
     "slug": "Clanker",
-    "version": "1.0.0",
+    "version": "1.2.0",
     "scheme": "clanker",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -18,12 +18,15 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0D0D0D",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.REQUEST_INSTALL_PACKAGES"
+      ],
+      "package": "com.danie4588e.Clanker"
     },
     "plugins": [
       "expo-router",
@@ -46,8 +49,36 @@
           }
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Clanker uses your camera to scan the pairing code of a remote backend.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
       "expo-font",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#0D0D0D",
+          "enableRemoteNotifications": false
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "backgroundColor": "#FFFFFF",
+          "dark": {
+            "image": "./assets/splash-icon-dark.png",
+            "backgroundColor": "#000000"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

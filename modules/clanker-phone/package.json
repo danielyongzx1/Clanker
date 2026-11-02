@@ -1,0 +1,7 @@
+{
+  "name": "clanker-phone",
+  "version": "1.0.0",
+  "description": "Lets Clanker's agent read the screen and operate other apps through an accessibility service (Android only).",
+  "main": "index.ts",
+  "private": true
+}

@@ -1,0 +1,4 @@
+<resources>
+  <string name="clanker_phone_label">Clanker phone control</string>
+  <string name="clanker_phone_description">Lets the AI models you chat with in Clanker read what is on your screen and operate apps for you: opening apps, tapping, typing, scrolling and pressing Back or Home. It only acts while a chat reply is running, and a Stop button stays on screen the whole time. Screen contents are sent to the model provider you chose.</string>
+</resources>

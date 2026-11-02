@@ -7,11 +7,16 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { DialogHost } from '@/components/Dialogs';
+import { ReplyNotifications } from '@/components/ReplyNotifications';
 import { ScriptRuntime } from '@/components/ScriptRuntime';
+import { UpdateCheck } from '@/components/Updates';
 import { useTheme } from '@/lib/theme';
 import { useSettings } from '@/store/settings';
 
 const RUNTIME_DELAY = 600;
+
+// A screen opened from a link, such as a bridge's pairing code, still has the chats under it.
+export const unstable_settings = { anchor: '(drawer)' };
 
 export default function RootLayout() {
   const themePreference = useSettings((s) => s.theme);
@@ -64,7 +69,9 @@ export default function RootLayout() {
             <Stack screenOptions={{ headerShadowVisible: false, headerBackButtonDisplayMode: 'minimal', freezeOnBlur: true }}>
               <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
               <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
+              <Stack.Screen name="settings/backend" options={{ presentation: 'modal', title: 'Backend' }} />
               <Stack.Screen name="settings/endpoint" options={{ presentation: 'modal', title: 'Endpoint' }} />
+              <Stack.Screen name="pair" options={{ headerShown: false, animation: 'none' }} />
               <Stack.Screen name="settings/workspace" options={{ title: 'Workspace files' }} />
               <Stack.Screen name="settings/tools" options={{ title: 'Files & code' }} />
               <Stack.Screen name="settings/context" options={{ title: 'Auto-compression' }} />
@@ -78,6 +85,8 @@ export default function RootLayout() {
               <Stack.Screen name="projects/instructions" options={{ title: 'Instructions' }} />
             </Stack>
             <DialogHost />
+            <UpdateCheck />
+            <ReplyNotifications />
             {runtimeOn && <ScriptRuntime />}
           </ThemeProvider>
         </SafeAreaProvider>

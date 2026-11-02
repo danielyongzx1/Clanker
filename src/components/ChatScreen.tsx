@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { Alert, AppState, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useDerivedValue, useSharedValue } from 'react-native-reanimated';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { MessageList } from '@/components/MessageList';
 import { ModelPicker } from '@/components/ModelPicker';
 import { regenerate, stopStreaming, submitMessage } from '@/lib/chat';
+import { brandOfBackendKind, brandOfModel, friendlyModelName } from '@/lib/modelNames';
 import type { AttachmentPart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 import { useContextUsage } from '@/lib/usage';
@@ -20,6 +21,8 @@ import { useChats } from '@/store/chats';
 import { useProjects } from '@/store/projects';
 import { useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
+import { useBackends } from '@/store/backends';
+import { refreshRemoteBackend, resumeRemoteChat } from '@/lib/remote/chat';
 
 // How far the header fade reaches past its controls into the conversation.
 const HEADER_FADE = 16;
@@ -51,6 +54,9 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
       return c
         ? {
             memory: c.memory,
+            backendId: c.backendId ?? 'local',
+            model: c.model,
+            pendingRemote: !!c.remote?.submissionId,
             projectId: c.projectId,
             empty: c.messages.length === 0,
             streaming: c.messages.some((m) => m.status === 'streaming'),
@@ -59,12 +65,19 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
     })
   );
   const active = useSettings((s) => s.active);
+  const selectedBackend = useBackends((s) => s.selected);
+  const backendId = conversation?.backendId ?? selectedBackend;
+  const remote = backendId !== 'local';
+  const backendName = useBackends((s) => s.remotes.find((b) => b.id === backendId)?.name ?? (backendId === 'local' ? 'Clanker' : 'Remote backend'));
+  const remoteModel = useBackends((s) => s.remotes.find((b) => b.id === backendId)?.model);
   const hasEndpoint = useSettings((s) => s.endpoints.some((e) => e.models.length > 0));
+  const friendly = useSettings((s) => s.friendlyModelNames);
   const showUsage = useSettings((s) => s.contextUsage);
   const usage = useContextUsage(currentId, showUsage);
   const memorySetting = useSettings((s) => s.memory);
+  const backendKind = useBackends((s) => s.remotes.find((b) => b.id === backendId)?.kind);
   const newChatMemoryOff = useUI((s) => s.newChatMemoryOff);
-  const memoryOff = memorySetting && (conversation ? conversation.memory === false : newChatMemoryOff);
+  const memoryOff = !remote && memorySetting && (conversation ? conversation.memory === false : newChatMemoryOff);
   const newChatProjectId = useUI((s) => s.newChatProjectId);
   const projectId = conversation ? conversation.projectId : newChatProjectId;
   const projectName = useProjects((s) => (projectId ? s.projects[projectId]?.name : undefined));
@@ -84,12 +97,22 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
   );
   const emptyInsetStyle = useAnimatedStyle(() => ({ paddingBottom: bottomInset.value }));
 
-  const streaming = !!conversation?.streaming;
+  const streaming = !!conversation?.streaming || !!conversation?.pendingRemote;
+  useEffect(() => {
+    if (!remote) return;
+    void refreshRemoteBackend(backendId).catch(() => {});
+  }, [backendId, remote]);
+  useEffect(() => {
+    if (!currentId || !remote) return;
+    void resumeRemoteChat(currentId);
+    const listener = AppState.addEventListener('change', (state) => { if (state === 'active') void resumeRemoteChat(currentId); });
+    return () => listener.remove();
+  }, [currentId, remote]);
 
   // Reopening a chat switches back to the model it was using, as ChatGPT does.
   useEffect(() => {
     const conversation = currentId ? useChats.getState().conversations[currentId] : undefined;
-    if (!conversation) return;
+    if (!conversation || (conversation.backendId && conversation.backendId !== 'local')) return;
     const { endpoints, setActive } = useSettings.getState();
     const endpoint = endpoints.find((e) => e.id === conversation.endpointId);
     if (endpoint?.models.includes(conversation.model)) {
@@ -118,6 +141,12 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
     [currentId, streaming]
   );
 
+  // The header title: raw ids, or with friendly names the brand mark plus a tidied model name.
+  // A remote chat carries its backend's mark (Hermes / DeepSeek Harness); local ones carry none.
+  const rawTitle = remote ? (conversation?.model ?? remoteModel ?? backendName) : (active?.model ?? 'Clanker');
+  const title = friendly && rawTitle !== 'Clanker' && rawTitle !== backendName ? friendlyModelName(rawTitle) || rawTitle : rawTitle;
+  const titleBrand = friendly ? (remote ? (backendKind ? brandOfBackendKind(backendKind) : undefined) : active ? brandOfModel(active.model) : undefined) : undefined;
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* With KeyboardProvider mounted the Android window no longer resizes for the keyboard,
@@ -129,18 +158,22 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
           {currentId && conversation && !conversation.empty ? (
             <MessageList
               conversationId={currentId}
-              onRegenerate={onRegenerate}
+              onRegenerate={remote ? undefined : onRegenerate}
               topInset={topInset}
               bottomInset={bottomInset}
             />
           ) : (
             <Animated.View style={[styles.container, { paddingTop: topInset }, emptyInsetStyle]}>
               <EmptyState
-                hasEndpoint={hasEndpoint}
+                hasEndpoint={remote ? !!remoteModel : hasEndpoint}
+                remote={remote ? backendName : undefined}
+                remoteBrand={remote && friendly && backendKind ? brandOfBackendKind(backendKind) : undefined}
                 memoryOff={memoryOff}
                 project={projectName}
                 onSuggestion={setDraft}
-                onAddEndpoint={() => router.push('/settings/endpoint')}
+                onAddEndpoint={() =>
+                  router.push(remote ? { pathname: '/settings/backend', params: { id: backendId } } : '/settings/endpoint')
+                }
               />
             </Animated.View>
           )}
@@ -166,10 +199,12 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
       >
         <EdgeFade solid="top" style={StyleSheet.absoluteFill} />
         <ChatHeader
-          title={active?.model ?? 'Clanker'}
+          title={title}
           onMenu={onMenu}
           onBack={onBack}
           onTitle={() => setPickerOpen(true)}
+          backend={remote ? backendName : undefined}
+          brand={titleBrand}
           onNewChat={
             currentId
               ? () => (conversation?.projectId ? useUI.getState().openNewInProject(conversation.projectId) : open(null))
@@ -177,12 +212,12 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
           }
           memoryOff={memoryOff}
           onToggleMemory={
-            !currentId && memorySetting ? () => useUI.getState().setNewChatMemoryOff(!newChatMemoryOff) : undefined
+            !currentId && memorySetting && !remote ? () => useUI.getState().setNewChatMemoryOff(!newChatMemoryOff) : undefined
           }
         />
       </View>
 
-      <ModelPicker visible={pickerOpen} onClose={() => setPickerOpen(false)} onManage={() => router.push('/settings')} />
+      <ModelPicker visible={pickerOpen} onClose={() => setPickerOpen(false)} conversationId={currentId} />
     </View>
   );
 }

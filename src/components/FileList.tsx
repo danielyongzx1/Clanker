@@ -5,24 +5,11 @@ import { ActionSheetIOS, Alert, FlatList, Platform, Pressable, StyleSheet, Text,
 import { openWorkspaceFile, shareWorkspaceFile } from '@/lib/openFile';
 import { useTheme } from '@/lib/theme';
 import { formatSize, type Workspace, type WorkspaceEntry } from '@/lib/workspace';
+import { FileIcon } from './FileIcon';
 
 function report(e: unknown) {
   Alert.alert('Something went wrong', e instanceof Error ? e.message : String(e));
 }
-
-const ICONS: [RegExp, keyof typeof Feather.glyphMap][] = [
-  [/\.(png|jpe?g|gif|webp|bmp|heic|heif|svg)$/i, 'image'],
-  [/\.(pdf|docx?|odt|rtf|txt|md|epub)$/i, 'file-text'],
-  [/\.(xlsx?|csv|tsv|ods)$/i, 'grid'],
-  [/\.(pptx?|odp|key)$/i, 'monitor'],
-  [/\.(zip|gz|tgz|7z|rar|tar)$/i, 'archive'],
-  [/\.(mp3|wav|ogg|m4a|flac)$/i, 'music'],
-  [/\.(mp4|mov|webm|mkv)$/i, 'film'],
-  [/\.html?$/i, 'globe'],
-  [/\.(js|ts|tsx|jsx|py|json|html?|css|sh|java|kt|swift|c|cpp|h|rs|go|rb|php|sql|ya?ml|xml)$/i, 'code'],
-];
-
-export const iconFor = (path: string) => ICONS.find(([re]) => re.test(path))?.[1] ?? 'file';
 
 /**
  * The files in a workspace, newest first: tap to open, long-press (or the dots) to share or delete.
@@ -160,7 +147,7 @@ export function FileList({
               pressed && { backgroundColor: colors.surfaceHover },
             ]}
           >
-            <Feather name={iconFor(item.path)} size={18} color={colors.textSecondary} />
+            <FileIcon name={item.path} uri={workspace.fileAt(item.path).uri} size={36} />
             <View style={{ flex: 1 }}>
               <Text numberOfLines={1} style={[styles.name, { color: colors.text }]}>
                 {name.split('/').pop()}
@@ -193,7 +180,7 @@ export function FileList({
 const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 48 },
   summary: { fontSize: 13, marginBottom: 8, marginLeft: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 10 },
   first: { borderTopLeftRadius: 14, borderTopRightRadius: 14 },
   last: { borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
   name: { fontSize: 16 },

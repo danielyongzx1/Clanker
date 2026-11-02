@@ -1,4 +1,4 @@
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/lib/haptics';
 import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { stopStreaming } from '@/lib/chat';

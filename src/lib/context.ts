@@ -20,7 +20,7 @@ export type Unit = {
 };
 
 // Rough token costs; good enough to steer compression, not to bill.
-const CHARS_PER_TOKEN = 4;
+export const CHARS_PER_TOKEN = 4;
 const IMAGE_TOKENS = 1500;
 
 // Providers that take binary non-image attachments inline (PDFs and the like).

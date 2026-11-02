@@ -1,0 +1,10 @@
+{
+  "name": "clanker-harness-desktop-bridge",
+  "version": "1.0.0",
+  "description": "Start Clanker's remote bridge with the current Harness Desktop connection.",
+  "type": "module",
+  "main": "index.mjs",
+  "files": ["index.mjs", "local.config.json", "cordis.patch.yml"],
+  "engines": { "dsh": "0.2.1-rc.5" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

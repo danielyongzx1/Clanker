@@ -1,16 +1,16 @@
 import Feather from '@expo/vector-icons/Feather';
-import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { BrandIcon, type BrandId } from './BrandIcon';
+import { useSuggestions } from '@/lib/suggestions';
 import { useTheme } from '@/lib/theme';
 
-const SUGGESTIONS: { icon: ComponentProps<typeof Feather>['name']; tint: string; text: string }[] = [
-  { icon: 'cpu', tint: '#4C8DF6', text: 'Explain how transformers work, simply' },
-  { icon: 'mail', tint: '#EA4335', text: 'Write a polite follow-up email' },
-  { icon: 'map-pin', tint: '#34A853', text: 'Plan a 3-day trip to Kyoto' },
-  { icon: 'code', tint: '#F4B400', text: 'Debug a React useEffect loop' },
-];
+const SUGGESTION_COLORS = ['#4C8DF6', '#EA4335', '#34A853', '#F4B400'];
 
 type Props = {
+  /** The remote backend the chat about to be started runs on; unset for the built-in agent. */
+  remote?: string;
+  /** The backend's brand mark, shown in place of the server glyph with friendly names on. */
+  remoteBrand?: BrandId;
   hasEndpoint: boolean;
   onSuggestion: (text: string) => void;
   onAddEndpoint: () => void;
@@ -20,15 +20,18 @@ type Props = {
   project?: string;
 };
 
-export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff, project }: Props) {
+export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff, project, remote, remoteBrand }: Props) {
   const { colors } = useTheme();
+  const { suggestions, loading, error } = useSuggestions(project, memoryOff);
 
   if (!hasEndpoint) {
     return (
       <View style={styles.center}>
-        <Text style={[styles.heading, { color: colors.text }]}>Connect a model to start</Text>
+        <Text style={[styles.heading, { color: colors.text }]}>
+          {remote ? `${remote} has no model yet` : 'Connect a model to start'}
+        </Text>
         <Pressable onPress={onAddEndpoint} style={[styles.cta, { backgroundColor: colors.sendBg }]}>
-          <Text style={[styles.ctaText, { color: colors.sendFg }]}>Add an endpoint</Text>
+          <Text style={[styles.ctaText, { color: colors.sendFg }]}>{remote ? 'Check the backend' : 'Add an endpoint'}</Text>
         </Pressable>
       </View>
     );
@@ -43,9 +46,20 @@ export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff
             {project}
           </Text>
           <Text style={[styles.temporaryText, { color: colors.textTertiary }]}>
-            {memoryOff
+            {remote ? 'New remote chat in this project. Its instructions are sent to the backend; files and memory are managed on the remote device.' : memoryOff
               ? "A temporary chat in this project: it shares the project's files and instructions, but won't use or save memories."
               : "New chat in this project. It shares the project's files, sources and instructions."}
+          </Text>
+        </View>
+      )}
+      {!!remote && !project && (
+        <View style={styles.temporary}>
+          {remoteBrand ? <BrandIcon brand={remoteBrand} size={28} /> : <Feather name="server" size={22} color={colors.textSecondary} />}
+          <Text numberOfLines={2} style={[styles.temporaryTitle, { color: colors.text }]}>
+            {remote}
+          </Text>
+          <Text style={[styles.temporaryText, { color: colors.textTertiary }]}>
+            Tools, files and memory live on that device. The chat stays on it after the first message.
           </Text>
         </View>
       )}
@@ -58,15 +72,26 @@ export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff
           </Text>
         </View>
       )}
-      {SUGGESTIONS.map((s) => (
+      {loading && (
+        <Text style={[styles.status, styles.loading, { color: colors.textTertiary }]}>Generating suggestions…</Text>
+      )}
+      {error && !suggestions.length && (
+        <Text style={[styles.status, styles.loading, { color: colors.textSecondary }]}>
+          Suggestions unavailable. Please try again tomorrow.
+        </Text>
+      )}
+      {suggestions.map((s, index) => (
         <Pressable
-          key={s.text}
-          onPress={() => onSuggestion(s.text)}
+          key={s.summary}
+          onPress={() => onSuggestion(s.prompt)}
+          accessibilityRole="button"
+          accessibilityLabel={s.summary}
+          accessibilityHint="Adds the full prompt to your message for editing"
           style={({ pressed }) => [styles.row, pressed && { opacity: 0.5 }]}
         >
-          <Feather name={s.icon} size={22} color={s.tint} />
+          <Feather name={s.icon} size={22} color={SUGGESTION_COLORS[index]} />
           <Text numberOfLines={1} style={[styles.rowText, { color: colors.text }]}>
-            {s.text}
+            {s.summary}
           </Text>
         </Pressable>
       ))}
@@ -82,6 +107,8 @@ const styles = StyleSheet.create({
   ctaText: { fontSize: 15, fontWeight: '600' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 18, paddingVertical: 14 },
   rowText: { fontSize: 17, flexShrink: 1 },
+  status: { fontSize: 14, flexShrink: 1 },
+  loading: { paddingVertical: 14 },
   temporary: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 },
   temporaryTitle: { fontSize: 20, fontWeight: '600' },
   temporaryText: { fontSize: 15, lineHeight: 21, textAlign: 'center' },

@@ -12,9 +12,11 @@ import type { ImagePart, Source, ToolCall, ToolSpec } from '../providers';
 import { releaseWorker, runScript, type ScriptResult } from '../runtime';
 import { uid } from '../storage';
 import { formatSize, type Workspace, type WorkspaceEntry } from '../workspace';
+import type { ToolEntry } from './catalog';
 import { describeCall, lineChanges } from './describe';
 import { extractZipDocument, ZIP_DOCUMENT_EXT } from './documents';
 import { forgetObserved, isObserved, markObserved, requireObserved } from './observe';
+import { PHONE_TOOLS, phoneAvailable, phoneSupported } from './phone';
 import { download, htmlToMarkdown, renderPage, SEARCH_PROVIDERS, searchWeb } from './web';
 
 export type ToolOutcome = {
@@ -41,7 +43,7 @@ export type ToolContext = {
   workspace: Workspace;
 };
 
-type Tool = ToolSpec & { run: (input: any, ctx: ToolContext) => Promise<ToolOutcome> };
+export type Tool = ToolSpec & { run: (input: any, ctx: ToolContext) => Promise<ToolOutcome> };
 
 // Results above this are cut down to their head and tail before going back to the model.
 const MAX_OUTPUT_CHARS = 30_000;
@@ -946,16 +948,22 @@ const TOOLS: Tool[] = [
   searchContextTool,
   contextStatusTool,
   ...MEMORY_TOOLS,
+  ...PHONE_TOOLS,
 ];
 
 export const shellAvailable = () => Platform.OS === 'android' && !!ClankerShell;
 
 export const webEnabled = () => useSettings.getState().web;
 
+/** Whether this device can offer a settings entry's tools at all, whether or not they are turned on. */
+export const entryAvailable = (entry: ToolEntry) =>
+  entry.names.includes('run_shell') ? shellAvailable() : entry.names.includes('phone_screen') ? phoneSupported() : true;
+
 /** `conversationId` is the chat the tool is for; null is the chat about to be started. */
 function enabled(tool: Tool, conversationId?: string | null) {
   if (useSettings.getState().disabledTools.includes(tool.name)) return false;
   if (tool === runShell) return shellAvailable();
+  if (PHONE_TOOLS.includes(tool)) return phoneAvailable();
   if (tool === webSearch || tool === webFetch) return webEnabled();
   if (MEMORY_TOOLS.includes(tool)) return conversationId !== undefined && memoryOn(conversationId);
   return true;
@@ -1009,4 +1017,4 @@ export async function executeTool(call: ToolCall, ctx: Omit<ToolContext, 'callId
   }
 }
 
-export { describeCall, lineChanges };
+export { describeCall, lineChanges, phoneAvailable, phoneSupported };
