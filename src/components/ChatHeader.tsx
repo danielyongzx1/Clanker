@@ -127,5 +127,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   chevron: { paddingLeft: 8, paddingRight: 10 },
-  titleText: { fontSize: 16, fontWeight: '500' },
+  // Shrinkable so that when the backend/memory icons make the pill too wide, the name truncates
+  // with an ellipsis early instead of overflowing past the thumb's padding to the pill's edge.
+  titleText: { fontSize: 16, fontWeight: '500', flexShrink: 1 },
 });
