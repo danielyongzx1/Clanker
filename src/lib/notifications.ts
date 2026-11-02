@@ -1,6 +1,5 @@
-import * as Notifications from 'expo-notifications';
-import { AndroidImportance } from 'expo-notifications';
 import { AppState, Platform } from 'react-native';
+import { Notifications } from '@/lib/expoNotifications';
 import { messageText, useChats } from '@/store/chats';
 
 /**
@@ -14,7 +13,7 @@ const BODY_MAX = 200;
 
 let ready: Promise<void> | null = null;
 
-function setUp() {
+function setUp(Notifications: typeof import('expo-notifications')) {
   ready ??= (async () => {
     // In the foreground the chat shows the reply itself.
     Notifications.setNotificationHandler({
@@ -28,7 +27,7 @@ function setUp() {
       await Notifications.setNotificationChannelAsync(CHANNEL, {
         name: 'Replies',
         description: 'When a reply finishes while Clanker is in the background',
-        importance: AndroidImportance.HIGH,
+        importance: Notifications.AndroidImportance.HIGH,
       });
     }
   })().catch(() => {});
@@ -39,9 +38,9 @@ let asked = false;
 
 /** Asks for permission to notify, once per launch and only if never answered: on the first reply, when it's clear what for. */
 export async function askToNotify() {
-  if (asked) return;
+  if (asked || !Notifications) return;
   asked = true;
-  await setUp();
+  await setUp(Notifications);
   try {
     const { status, canAskAgain } = await Notifications.getPermissionsAsync();
     if (status === 'undetermined' && canAskAgain) await Notifications.requestPermissionsAsync();
@@ -57,11 +56,11 @@ function preview(text: string) {
 
 /** Announces the finished reply, unless the app is on screen. */
 export async function notifyReplyFinished(conversationId: string, messageId: string) {
-  if (AppState.currentState === 'active') return;
+  if (!Notifications || AppState.currentState === 'active') return;
   const conversation = useChats.getState().conversations[conversationId];
   const message = conversation?.messages.find((m) => m.id === messageId);
   if (!conversation || !message) return;
-  await setUp();
+  await setUp(Notifications);
   const body =
     message.status === 'error' ? `Couldn't finish: ${message.error ?? 'something went wrong.'}` : preview(messageText(message)) || 'Done.';
   try {

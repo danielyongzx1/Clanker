@@ -55,32 +55,27 @@ export function ChatHeader({ title, onMenu, onBack, onTitle, onNewChat, memoryOf
         </Pressable>
       )}
 
-      {/* Styled like ChatGPT's Chat/Work toggle; the highlighted segment is the active model. */}
+      {/* The model pill: one pill with the mark and name; tapping it opens the model sheet. */}
       <View pointerEvents="box-none" style={styles.center}>
         <Pressable
           onPress={onTitle}
           disabled={!onTitle}
           accessibilityLabel={`${backend ? `${title} on ${backend}` : title}${onTitle ? ', choose model' : ''}`}
           style={({ pressed }) => [
-            styles.track,
-            { backgroundColor: colors.segmentTrack },
+            styles.pill,
+            { backgroundColor: colors.segmentThumb },
             pressed && { opacity: 0.7 },
           ]}
         >
-          <View style={[styles.thumb, { backgroundColor: colors.segmentThumb }]}>
-            {memoryOff && <Feather name="eye-off" size={15} color={colors.textSecondary} />}
-            {brand ? (
-              <BrandIcon brand={brand} size={19} />
-            ) : (
-              !!backend && <Feather name="server" size={15} color={colors.textSecondary} />
-            )}
-            <Text numberOfLines={1} style={[styles.titleText, { color: colors.text }]}>
-              {title}
-            </Text>
-          </View>
-          {onTitle && <View style={styles.chevron}>
-            <Feather name="chevron-down" size={18} color={colors.textSecondary} />
-          </View>}
+          {memoryOff && <Feather name="eye-off" size={15} color={colors.textSecondary} />}
+          {brand ? (
+            <BrandIcon brand={brand} size={19} />
+          ) : (
+            !!backend && <Feather name="server" size={15} color={colors.textSecondary} />
+          )}
+          <Text numberOfLines={1} style={[styles.titleText, { color: colors.text }]}>
+            {title}
+          </Text>
         </Pressable>
       </View>
 
@@ -123,18 +118,17 @@ const styles = StyleSheet.create({
   },
   bar: { height: 2, borderRadius: 1 },
   center: { flex: 1, alignItems: 'center' },
-  track: { flexDirection: 'row', alignItems: 'center', height: 46, borderRadius: 23, padding: 4, maxWidth: '100%' },
-  thumb: {
-    height: 38,
-    borderRadius: 19,
+  pill: {
+    height: 46,
+    borderRadius: 23,
     paddingHorizontal: 18,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     flexShrink: 1,
+    maxWidth: '100%',
   },
-  chevron: { paddingLeft: 8, paddingRight: 10 },
   // Shrinkable so that when the backend/memory icons make the pill too wide, the name truncates
-  // with an ellipsis early instead of overflowing past the thumb's padding to the pill's edge.
+  // with an ellipsis early instead of overflowing past the pill's padding to its edge.
   titleText: { fontSize: 16, fontWeight: '500', flexShrink: 1 },
 });

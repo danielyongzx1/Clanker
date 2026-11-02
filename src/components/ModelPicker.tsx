@@ -314,7 +314,7 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
                 This bridge keeps a chat on the model it started with. Update the bridge on the host to switch models
                 within a chat, or start a new chat to use another.
               </Text>
-              <Text style={[styles.section, { color: colors.textTertiary }]}>Files on the remote device</Text>
+              <Text style={[styles.section, styles.sectionPad, { color: colors.textTertiary }]}>Files on the remote device</Text>
               {conversationId && <RemoteFiles chatId={conversationId} />}
             </ScrollView>
           ) : (
@@ -344,7 +344,9 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
                 renderSectionHeader={({ section }) => (
                   <View style={styles.sectionRow}>
                     {section.brand && <BrandIcon brand={section.brand} size={14} />}
-                    <Text style={[styles.section, { color: colors.textTertiary }]}>{section.title}</Text>
+                    <Text style={[styles.section, { color: colors.textTertiary }]}>
+                      {section.title}
+                    </Text>
                   </View>
                 )}
                 renderItem={({ item }) => (
@@ -387,7 +389,7 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
                           ? 'A remote chat keeps its backend; a new model applies from the next message. Start a new chat to use another backend.'
                           : 'This bridge keeps a chat on the provider it started with; a new model applies from the next message. Update the bridge on the host to switch providers.'}
                       </Text>
-                      <Text style={[styles.section, { color: colors.textTertiary }]}>Files on the remote device</Text>
+                      <Text style={[styles.section, styles.sectionPad, { color: colors.textTertiary }]}>Files on the remote device</Text>
                       <RemoteFiles chatId={conversationId} />
                     </>
                   ) : undefined
@@ -464,9 +466,13 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 16, paddingVertical: 10 },
   list: { flex: 1 },
-  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // Vertical padding lives on the row, not the label: uneven padding on the text would center the
+  // brand mark against the padded box and lift it above the label.
+  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 },
   modelWithBrand: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1, minWidth: 0 },
-  section: { fontSize: 13, fontWeight: '500', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 },
+  section: { fontSize: 13, fontWeight: '500' },
+  // Standalone section labels carry the row's inset themselves.
+  sectionPad: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

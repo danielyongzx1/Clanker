@@ -167,6 +167,7 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
               <EmptyState
                 hasEndpoint={remote ? !!remoteModel : hasEndpoint}
                 remote={remote ? backendName : undefined}
+                remoteBrand={remote && friendly && backendKind ? brandOfBackendKind(backendKind) : undefined}
                 memoryOff={memoryOff}
                 project={projectName}
                 onSuggestion={setDraft}

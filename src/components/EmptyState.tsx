@@ -1,5 +1,6 @@
 import Feather from '@expo/vector-icons/Feather';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { BrandIcon, type BrandId } from './BrandIcon';
 import { useSuggestions } from '@/lib/suggestions';
 import { useTheme } from '@/lib/theme';
 
@@ -8,6 +9,8 @@ const SUGGESTION_COLORS = ['#4C8DF6', '#EA4335', '#34A853', '#F4B400'];
 type Props = {
   /** The remote backend the chat about to be started runs on; unset for the built-in agent. */
   remote?: string;
+  /** The backend's brand mark, shown in place of the server glyph with friendly names on. */
+  remoteBrand?: BrandId;
   hasEndpoint: boolean;
   onSuggestion: (text: string) => void;
   onAddEndpoint: () => void;
@@ -17,7 +20,7 @@ type Props = {
   project?: string;
 };
 
-export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff, project, remote }: Props) {
+export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff, project, remote, remoteBrand }: Props) {
   const { colors } = useTheme();
   const { suggestions, loading, error } = useSuggestions(project, memoryOff);
 
@@ -51,7 +54,7 @@ export function EmptyState({ hasEndpoint, onSuggestion, onAddEndpoint, memoryOff
       )}
       {!!remote && !project && (
         <View style={styles.temporary}>
-          <Feather name="server" size={22} color={colors.textSecondary} />
+          {remoteBrand ? <BrandIcon brand={remoteBrand} size={28} /> : <Feather name="server" size={22} color={colors.textSecondary} />}
           <Text numberOfLines={2} style={[styles.temporaryTitle, { color: colors.text }]}>
             {remote}
           </Text>

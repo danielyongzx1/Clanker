@@ -1,6 +1,7 @@
-import * as Notifications from 'expo-notifications';
+import type { NotificationResponse } from 'expo-notifications';
 import { router } from 'expo-router';
 import { useEffect } from 'react';
+import { Notifications } from '@/lib/expoNotifications';
 import { useChats } from '@/store/chats';
 import { useUI } from '@/store/ui';
 import { openProjectChat } from './ProjectMenu';
@@ -24,18 +25,20 @@ function openChat(id: string) {
 /** Opens the chat of a tapped reply notification (see lib/notifications). */
 export function ReplyNotifications() {
   useEffect(() => {
+    const notifications = Notifications;
+    if (!notifications) return;
     // The launch tap can arrive both ways; each notification is handled once.
     let handled = 0;
-    const handle = (response: Notifications.NotificationResponse | null) => {
+    const handle = (response: NotificationResponse | null) => {
       if (!response || response.notification.date === handled) return;
       handled = response.notification.date;
-      Notifications.clearLastNotificationResponse();
+      notifications.clearLastNotificationResponse();
       const id = response.notification.request.content.data?.conversationId;
       if (typeof id === 'string') openChat(id);
     };
     // Tapped while the app wasn't running.
-    handle(Notifications.getLastNotificationResponse());
-    const subscription = Notifications.addNotificationResponseReceivedListener(handle);
+    handle(notifications.getLastNotificationResponse());
+    const subscription = notifications.addNotificationResponseReceivedListener(handle);
     return () => subscription.remove();
   }, []);
   return null;
