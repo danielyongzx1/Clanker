@@ -16,6 +16,10 @@ let jax: { adaptor: LiteAdaptor; doc: MathDocument<any, any, any> } | null = nul
 /* eslint-disable @typescript-eslint/no-require-imports */
 function load() {
   if (jax) return jax;
+  // MathJax reads its version from this global, which its own bundles define; without it, it
+  // falls back to eval('require') to read package.json, which only exists in Node and crashed the app.
+  // A module that throws while loading is fatal in React Native, so a try/catch around it can't help.
+  (globalThis as { PACKAGE_VERSION?: string }).PACKAGE_VERSION ??= require('mathjax-full/package.json').version;
   const { mathjax } = require('mathjax-full/js/mathjax') as typeof import('mathjax-full/js/mathjax');
   const { TeX } = require('mathjax-full/js/input/tex') as typeof import('mathjax-full/js/input/tex');
   const { SVG } = require('mathjax-full/js/output/svg') as typeof import('mathjax-full/js/output/svg');
