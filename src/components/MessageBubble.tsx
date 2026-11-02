@@ -12,6 +12,8 @@ import { formatStats } from '@/lib/stats';
 import { useTheme } from '@/lib/theme';
 import { messageText, type Message } from '@/store/chats';
 import { useSettings } from '@/store/settings';
+import { BrandIcon } from './BrandIcon';
+import { brandOfModel, friendlyModelName } from '@/lib/modelNames';
 import { RemoteReply } from './RemoteReply';
 import { Markdown } from './Markdown';
 import { NestedScroll } from './NestedScroll';
@@ -192,6 +194,7 @@ function MessageBubbleInner({ conversationId, message, isLast, onRegenerate }: P
   const [copied, setCopied] = useState(false);
   const showSpeed = useSettings((s) => s.decodeSpeed);
   const showCache = useSettings((s) => s.cacheHits);
+  const friendly = useSettings((s) => s.friendlyModelNames);
   const stats = formatStats(message.stats, { speed: showSpeed, cache: showCache });
   const text = messageText(message);
   const images = message.content.filter((p): p is ImagePart => p.type === 'image');
@@ -299,11 +302,19 @@ function MessageBubbleInner({ conversationId, message, isLast, onRegenerate }: P
               <Feather name="refresh-cw" size={16} color={colors.textSecondary} />
             </Pressable>
           )}
-          {!!message.model && (
-            <Text numberOfLines={1} style={[styles.model, { color: colors.textTertiary }]}>
-              {message.model}
-            </Text>
-          )}
+          {!!message.model &&
+            (friendly && message.model !== 'Clanker' ? (
+              <View style={styles.modelBrand}>
+                {brandOfModel(message.model) && <BrandIcon brand={brandOfModel(message.model)!} size={13} />}
+                <Text numberOfLines={1} style={[styles.model, { color: colors.textTertiary, marginLeft: brandOfModel(message.model) ? 0 : 6 }]}>
+                  {friendlyModelName(message.model) || message.model}
+                </Text>
+              </View>
+            ) : (
+              <Text numberOfLines={1} style={[styles.model, { color: colors.textTertiary }]}>
+                {message.model}
+              </Text>
+            ))}
           {!!stats && <Text style={[styles.stats, { color: colors.textTertiary }]}>· {stats}</Text>}
           {!!sources.length && (
             <View style={styles.sources}>
@@ -353,6 +364,7 @@ const styles = StyleSheet.create({
   thoughtsText: { fontSize: 14, lineHeight: 21 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2, marginLeft: -6 },
   action: { padding: 6 },
+  modelBrand: { flexDirection: 'row', alignItems: 'center', gap: 5, marginLeft: 6, minWidth: 0, flexShrink: 1 },
   model: { fontSize: 12, marginLeft: 6, flexShrink: 1 },
   stats: { fontSize: 12, fontVariant: ['tabular-nums'] },
   sources: { marginLeft: 'auto' },

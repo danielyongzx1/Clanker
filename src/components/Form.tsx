@@ -14,6 +14,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import Animated, { Easing, FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { BrandIcon, type BrandId } from '@/components/BrandIcon';
 import { Toggle } from '@/components/Toggle';
 import { useTheme } from '@/lib/theme';
 
@@ -96,6 +97,8 @@ export function Section({
 
 type RowProps = {
   icon?: IconName;
+  /** A brand mark in place of the feather icon, when friendly model names are on. */
+  brand?: BrandId;
   title: string;
   /** Second line under the title. */
   detail?: string;
@@ -119,6 +122,7 @@ type RowProps = {
 
 export function Row({
   icon,
+  brand,
   title,
   detail,
   value,
@@ -154,7 +158,7 @@ export function Row({
             { opacity: disabled ? 0.4 : 1, transitionProperty: 'opacity', transitionDuration: 200 },
           ]}
         >
-          {icon && <Feather name={icon} size={ICON} color={tintColor ?? colors.textSecondary} />}
+          {brand ? <BrandIcon brand={brand} size={ICON} /> : icon ? <Feather name={icon} size={ICON} color={tintColor ?? colors.textSecondary} /> : null}
           <View style={styles.rowText}>
             <Text numberOfLines={1} style={[styles.rowTitle, { color: tintColor ?? (muted ? colors.textTertiary : colors.text) }]}>
               {title}

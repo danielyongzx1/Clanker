@@ -1,6 +1,7 @@
 import Feather from '@expo/vector-icons/Feather';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BrandIcon, type BrandId } from './BrandIcon';
 import { useTheme } from '@/lib/theme';
 
 type Props = {
@@ -17,9 +18,11 @@ type Props = {
   onToggleMemory?: () => void;
   /** The remote backend this chat runs on, marked on the title; unset for the built-in agent. */
   backend?: string;
+  /** With friendly model names on, the mark shown before the title: the backend's or the model's provider. */
+  brand?: BrandId;
 };
 
-export function ChatHeader({ title, onMenu, onBack, onTitle, onNewChat, memoryOff, onToggleMemory, backend }: Props) {
+export function ChatHeader({ title, onMenu, onBack, onTitle, onNewChat, memoryOff, onToggleMemory, backend, brand }: Props) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const circle = [styles.circle, { backgroundColor: colors.chrome, borderColor: colors.chromeBorder }];
@@ -66,7 +69,11 @@ export function ChatHeader({ title, onMenu, onBack, onTitle, onNewChat, memoryOf
         >
           <View style={[styles.thumb, { backgroundColor: colors.segmentThumb }]}>
             {memoryOff && <Feather name="eye-off" size={15} color={colors.textSecondary} />}
-            {!!backend && <Feather name="server" size={15} color={colors.textSecondary} />}
+            {brand ? (
+              <BrandIcon brand={brand} size={19} />
+            ) : (
+              !!backend && <Feather name="server" size={15} color={colors.textSecondary} />
+            )}
             <Text numberOfLines={1} style={[styles.titleText, { color: colors.text }]}>
               {title}
             </Text>

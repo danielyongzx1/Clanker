@@ -8,6 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 import { useShallow } from 'zustand/react/shallow';
 import { PROVIDER_LABELS } from '@/lib/providers';
+import { BrandIcon, type BrandId } from './BrandIcon';
+import { brandOfBackendKind, brandOfEndpoint, brandOfModel, friendlyModelName } from '@/lib/modelNames';
 import { useTheme } from '@/lib/theme';
 import { modelProvider } from '@/lib/remote/types';
 import { useBackends } from '@/store/backends';
@@ -29,7 +31,7 @@ const EXIT = { duration: 180, easing: Easing.bezier(0.3, 0, 0.8, 0.6) };
 /** The share of the screen it opens at, the same whichever backend's models it shows. */
 const SHEET_HEIGHT = 0.6;
 
-type Choice = { key: string; model: string; selected: boolean; onPress: () => void };
+type Choice = { key: string; model: string; display: string; brand?: BrandId; selected: boolean; onPress: () => void };
 
 /**
  * The sheet behind the chat title. On a new chat it also picks the backend, from chips above the
@@ -42,6 +44,7 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
   const { height } = useWindowDimensions();
   const endpoints = useSettings((s) => s.endpoints);
   const active = useSettings((s) => s.active);
+  const friendly = useSettings((s) => s.friendlyModelNames);
   const remotes = useBackends((s) => s.remotes);
   const selectedBackend = useBackends((s) => s.selected);
   const conversation = useChats(
@@ -166,18 +169,23 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
 
   const sections = useMemo(() => {
     const q = query.trim().toLowerCase();
+    // With friendly names, rows show the brand mark and a tidied name; the raw id still matches search.
+    const shown = (m: string, brand?: BrandId) => (friendly ? { display: friendlyModelName(m) || m, brand } : { display: m, brand: undefined as BrandId | undefined });
     if (remote) {
       if (!backend || remoteLocked) return [];
       return [
         {
           key: backend.id,
-          title: `${backend.name} · ${BACKEND_LABELS[backend.kind]}`,
+          // Friendly mode: the backend's mark carries the kind, so the text drops it.
+          title: friendly ? backend.name : `${backend.name} · ${BACKEND_LABELS[backend.kind]}`,
+          brand: friendly ? brandOfBackendKind(backend.kind) : undefined,
           data: remoteModels
-            .filter((m) => !q || m.toLowerCase().includes(q))
+            .filter((m) => !q || m.toLowerCase().includes(q) || friendlyModelName(m).toLowerCase().includes(q))
             .map(
               (m): Choice => ({
                 key: m,
                 model: m,
+                ...shown(m, brandOfModel(m)),
                 selected: (chatModel ?? backend.model) === m,
                 onPress: () =>
                   chatModel && conversationId
@@ -191,20 +199,23 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
     return endpoints
       .map((e) => ({
         key: e.id,
-        title: `${e.name} · ${PROVIDER_LABELS[e.type]}`,
+        title: friendly ? e.name : `${e.name} · ${PROVIDER_LABELS[e.type]}`,
+        brand: friendly ? brandOfEndpoint(e) : undefined,
         data: e.models
-          .filter((m) => !q || m.toLowerCase().includes(q) || e.name.toLowerCase().includes(q))
+          .filter((m) => !q || m.toLowerCase().includes(q) || e.name.toLowerCase().includes(q) || (friendly && friendlyModelName(m).toLowerCase().includes(q)))
           .map(
             (m): Choice => ({
               key: `${e.id}-${m}`,
               model: m,
+              // A route like `openrouter/qwen/...` names its own brand; a plain id takes the endpoint's.
+              ...shown(m, brandOfModel(m) ?? brandOfEndpoint(e)),
               selected: active?.endpointId === e.id && active.model === m,
               onPress: () => useSettings.getState().setActive({ endpointId: e.id, model: m }),
             })
           ),
       }))
       .filter((s) => s.data.length > 0);
-  }, [remote, backend, remoteLocked, remoteModels, chatModel, conversationId, endpoints, active, query]);
+  }, [remote, backend, remoteLocked, remoteModels, chatModel, conversationId, endpoints, active, query, friendly]);
 
   const totalModels = remote ? remoteModels.length : endpoints.reduce((n, e) => n + e.models.length, 0);
 
@@ -245,7 +256,7 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
 
           {canSwitch && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.backends} style={styles.backendsRow}>
-              {[{ id: 'local', name: 'Clanker', icon: 'smartphone' as const }, ...remotes.map((b) => ({ id: b.id, name: b.name, icon: 'server' as const }))].map(
+              {[{ id: 'local', name: 'Clanker', brand: undefined as BrandId | undefined, icon: undefined as 'smartphone' | undefined }, ...remotes.map((b) => ({ id: b.id, name: b.name, brand: friendly ? brandOfBackendKind(b.kind) : undefined, icon: 'server' as const }))].map(
                 (b) => {
                   const on = b.id === backendId;
                   return (
@@ -264,7 +275,7 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
                         pressed && { opacity: 0.6 },
                       ]}
                     >
-                      <Feather name={b.icon} size={15} color={on ? colors.text : colors.textSecondary} />
+                      {b.brand ? <BrandIcon brand={b.brand} size={17} /> : b.icon ? <Feather name={b.icon} size={15} color={on ? colors.text : colors.textSecondary} /> : null}
                       {/* One weight for both states: bolding the chosen chip widened it and nudged the rest along. */}
                       <Text numberOfLines={1} style={{ color: on ? colors.text : colors.textSecondary, fontSize: 14, fontWeight: '500' }}>
                         {b.name}
@@ -278,15 +289,27 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
 
           {remoteLocked ? (
             <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: hiddenBottom }}>
+            <View style={styles.sectionRow}>
+              {friendly && backend && <BrandIcon brand={brandOfBackendKind(backend.kind)} size={14} />}
               <Text style={[styles.section, { color: colors.textTertiary }]}>
-                {backend ? `${backend.name} · ${BACKEND_LABELS[backend.kind]}` : 'Remote backend'}
+                {backend ? (friendly ? backend.name : `${backend.name} · ${BACKEND_LABELS[backend.kind]}`) : 'Remote backend'}
               </Text>
-              <View style={styles.row}>
+            </View>
+            <View style={styles.row}>
+              {friendly && conversation?.model ? (
+                <View style={styles.modelWithBrand}>
+                  {brandOfModel(conversation.model) && <BrandIcon brand={brandOfModel(conversation.model)!} size={18} />}
+                  <Text numberOfLines={1} style={[styles.model, { color: colors.text }]}>
+                    {friendlyModelName(conversation.model)}
+                  </Text>
+                </View>
+              ) : (
                 <Text numberOfLines={1} style={[styles.model, { color: colors.text }]}>
                   {conversation?.model}
                 </Text>
-                <Feather name="lock" size={16} color={colors.textTertiary} />
-              </View>
+              )}
+              <Feather name="lock" size={16} color={colors.textTertiary} />
+            </View>
               <Text style={[styles.note, { color: colors.textTertiary }]}>
                 This bridge keeps a chat on the model it started with. Update the bridge on the host to switch models
                 within a chat, or start a new chat to use another.
@@ -319,7 +342,10 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
                 style={styles.list}
                 contentContainerStyle={{ paddingBottom: hiddenBottom }}
                 renderSectionHeader={({ section }) => (
-                  <Text style={[styles.section, { color: colors.textTertiary }]}>{section.title}</Text>
+                  <View style={styles.sectionRow}>
+                    {section.brand && <BrandIcon brand={section.brand} size={14} />}
+                    <Text style={[styles.section, { color: colors.textTertiary }]}>{section.title}</Text>
+                  </View>
                 )}
                 renderItem={({ item }) => (
                   <Pressable
@@ -329,9 +355,18 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
                     }}
                     style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.surface }]}
                   >
-                    <Text numberOfLines={1} style={[styles.model, { color: colors.text }]}>
-                      {item.model}
-                    </Text>
+                    {item.brand ? (
+                      <View style={styles.modelWithBrand}>
+                        <BrandIcon brand={item.brand} size={18} />
+                        <Text numberOfLines={1} style={[styles.model, { color: colors.text }]}>
+                          {item.display}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text numberOfLines={1} style={[styles.model, { color: colors.text }]}>
+                        {item.display}
+                      </Text>
+                    )}
                     {item.selected && <Feather name="check" size={18} color={colors.text} />}
                   </Pressable>
                 )}
@@ -429,6 +464,8 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 16, paddingVertical: 10 },
   list: { flex: 1 },
+  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  modelWithBrand: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1, minWidth: 0 },
   section: { fontSize: 13, fontWeight: '500', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 },
   row: {
     flexDirection: 'row',

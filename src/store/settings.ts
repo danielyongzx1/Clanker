@@ -59,6 +59,8 @@ interface SettingsState {
   titleGeneration: boolean;
   /** Whether new chats show automatically generated prompt suggestions. */
   suggestions: boolean;
+  /** Whether providers and models show as brand marks with tidied names instead of raw ids. */
+  friendlyModelNames: boolean;
   followUp: FollowUpMode;
   upsertEndpoint: (endpoint: Endpoint) => void;
   removeEndpoint: (id: string) => void;
@@ -79,6 +81,7 @@ interface SettingsState {
   setShowArchived: (on: boolean) => void;
   setTitleGeneration: (on: boolean) => void;
   setSuggestions: (on: boolean) => void;
+  setFriendlyModelNames: (on: boolean) => void;
   setFollowUp: (mode: FollowUpMode) => void;
 }
 
@@ -103,6 +106,7 @@ export const useSettings = create<SettingsState>()(
       showArchived: false,
       titleGeneration: true,
       suggestions: true,
+      friendlyModelNames: true,
       followUp: 'queue',
       upsertEndpoint: (endpoint) => {
         const exists = get().endpoints.some((e) => e.id === endpoint.id);
@@ -146,6 +150,7 @@ export const useSettings = create<SettingsState>()(
       setShowArchived: (showArchived) => set({ showArchived }),
       setTitleGeneration: (titleGeneration) => set({ titleGeneration }),
       setSuggestions: (suggestions) => set({ suggestions }),
+      setFriendlyModelNames: (friendlyModelNames) => set({ friendlyModelNames }),
       setFollowUp: (followUp) => set({ followUp }),
     }),
     {

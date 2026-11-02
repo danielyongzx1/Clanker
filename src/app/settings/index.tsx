@@ -5,6 +5,7 @@ import { Row, Section, ToggleRow } from '@/components/Form';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { UpdateRow } from '@/components/Updates';
 import { PROVIDER_LABELS } from '@/lib/providers';
+import { brandOfBackendKind, brandOfEndpoint, friendlyModelName } from '@/lib/modelNames';
 import { entryAvailable } from '@/lib/tools';
 import { entryOn, LOCAL_TOOL_GROUPS, WEB_TOOLS } from '@/lib/tools/catalog';
 import { useTheme } from '@/lib/theme';
@@ -68,6 +69,8 @@ export default function SettingsScreen() {
   const setSuggestions = useSettings((s) => s.setSuggestions);
   const followUp = useSettings((s) => s.followUp);
   const setFollowUp = useSettings((s) => s.setFollowUp);
+  const friendly = useSettings((s) => s.friendlyModelNames);
+  const setFriendly = useSettings((s) => s.setFriendlyModelNames);
   const memoryCount = useMemory((s) => s.memories.filter((m) => !m.projectId).length);
   const checkOnLaunch = useUpdates((s) => s.checkOnLaunch);
   const setCheckOnLaunch = useUpdates((s) => s.setCheckOnLaunch);
@@ -83,8 +86,13 @@ export default function SettingsScreen() {
           <Row
             key={e.id}
             icon="cloud"
+            brand={friendly ? brandOfEndpoint(e) : undefined}
             title={e.name}
-            detail={`${PROVIDER_LABELS[e.type]} · ${e.models.length} model${e.models.length === 1 ? '' : 's'}`}
+            detail={
+              friendly
+                ? `${e.models.length} model${e.models.length === 1 ? '' : 's'}`
+                : `${PROVIDER_LABELS[e.type]} · ${e.models.length} model${e.models.length === 1 ? '' : 's'}`
+            }
             onPress={() => router.push({ pathname: '/settings/endpoint', params: { id: e.id } })}
           />
         ))}
@@ -99,8 +107,9 @@ export default function SettingsScreen() {
           <Row
             key={b.id}
             icon="server"
+            brand={friendly ? brandOfBackendKind(b.kind) : undefined}
             title={b.name}
-            detail={`${b.kind === 'hermes' ? 'Hermes' : 'DeepSeek Harness'} · ${b.model}`}
+            detail={friendly ? friendlyModelName(b.model) || b.model : `${b.kind === 'hermes' ? 'Hermes' : 'DeepSeek Harness'} · ${b.model}`}
             onPress={() => router.push({ pathname: '/settings/backend', params: { id: b.id } })}
           />
         ))}
@@ -208,6 +217,13 @@ export default function SettingsScreen() {
         <View style={styles.segment}>
           <SegmentedControl options={THEMES} value={theme} onChange={setTheme} />
         </View>
+        <ToggleRow
+          icon="aperture"
+          title="User-friendly model names"
+          detail="Show provider logos and tidy names instead of long model and provider ids"
+          value={friendly}
+          onValueChange={setFriendly}
+        />
       </Section>
 
       {updatesSupported && (

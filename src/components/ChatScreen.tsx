@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { MessageList } from '@/components/MessageList';
 import { ModelPicker } from '@/components/ModelPicker';
 import { regenerate, stopStreaming, submitMessage } from '@/lib/chat';
+import { brandOfBackendKind, brandOfModel, friendlyModelName } from '@/lib/modelNames';
 import type { AttachmentPart } from '@/lib/providers';
 import { useTheme } from '@/lib/theme';
 import { useContextUsage } from '@/lib/usage';
@@ -70,9 +71,11 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
   const backendName = useBackends((s) => s.remotes.find((b) => b.id === backendId)?.name ?? (backendId === 'local' ? 'Clanker' : 'Remote backend'));
   const remoteModel = useBackends((s) => s.remotes.find((b) => b.id === backendId)?.model);
   const hasEndpoint = useSettings((s) => s.endpoints.some((e) => e.models.length > 0));
+  const friendly = useSettings((s) => s.friendlyModelNames);
   const showUsage = useSettings((s) => s.contextUsage);
   const usage = useContextUsage(currentId, showUsage);
   const memorySetting = useSettings((s) => s.memory);
+  const backendKind = useBackends((s) => s.remotes.find((b) => b.id === backendId)?.kind);
   const newChatMemoryOff = useUI((s) => s.newChatMemoryOff);
   const memoryOff = !remote && memorySetting && (conversation ? conversation.memory === false : newChatMemoryOff);
   const newChatProjectId = useUI((s) => s.newChatProjectId);
@@ -138,6 +141,12 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
     [currentId, streaming]
   );
 
+  // The header title: raw ids, or with friendly names the brand mark plus a tidied model name.
+  // A remote chat carries its backend's mark (Hermes / DeepSeek Harness); local ones carry none.
+  const rawTitle = remote ? (conversation?.model ?? remoteModel ?? backendName) : (active?.model ?? 'Clanker');
+  const title = friendly && rawTitle !== 'Clanker' && rawTitle !== backendName ? friendlyModelName(rawTitle) || rawTitle : rawTitle;
+  const titleBrand = friendly ? (remote ? (backendKind ? brandOfBackendKind(backendKind) : undefined) : active ? brandOfModel(active.model) : undefined) : undefined;
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* With KeyboardProvider mounted the Android window no longer resizes for the keyboard,
@@ -189,11 +198,12 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
       >
         <EdgeFade solid="top" style={StyleSheet.absoluteFill} />
         <ChatHeader
-          title={remote ? (conversation?.model ?? remoteModel ?? backendName) : active?.model ?? 'Clanker'}
+          title={title}
           onMenu={onMenu}
           onBack={onBack}
           onTitle={() => setPickerOpen(true)}
           backend={remote ? backendName : undefined}
+          brand={titleBrand}
           onNewChat={
             currentId
               ? () => (conversation?.projectId ? useUI.getState().openNewInProject(conversation.projectId) : open(null))
