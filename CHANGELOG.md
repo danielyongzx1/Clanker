@@ -1,3 +1,12 @@
+# Clanker 1.2.0-beta.3
+
+- Show models by name, not id: a new **User-friendly model names** toggle in Settings, on by default, replaces provider labels and raw model ids with brand marks and tidy names — `llama-swap/qwen3.8-flash-next-mxfp4` reads as Qwen3.8 Flash Next MXFP4 under a Qwen mark. The marks appear on the chat title, in the model sheet's rows and backend chips, under replies, and in the endpoints and backends lists, for hosted endpoints and remote backends alike; search still matches the raw id, and switching the toggle off restores plain names everywhere.
+- Simplify the chat title's model selector into a single pill carrying the mark and name; a long name now truncates with an ellipsis when a backend or memory icon makes the pill too wide.
+- Run in Expo Go without notifications crashing: `expo-notifications` loads only in development and release builds, and reply notifications simply stay quiet where the module isn't available.
+- Silence haptics where vibration is unavailable: taps and slider drags stay still on a device or build without the native module instead of surfacing an error.
+
+---
+
 # Clanker 1.2.0-beta.2
 
 - Add the [hermes-clanker-bridge](https://github.com/danielyongzx1/hermes-clanker-bridge) Hermes plugin: install it from Hermes's Plugins and the gateway runs the bridge on Hermes's own Node, with the pairing QR code under Settings → Plugins in Hermes Desktop. It can take over a bridge run from `tools/remote-bridge`, keeping its chats. The bridge now loads its Harness adapter only for Harness, so a Hermes-only bridge needs no DeepSeek packages. The backend editor's setup steps point to the two plugins.
