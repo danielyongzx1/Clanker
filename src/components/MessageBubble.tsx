@@ -13,6 +13,7 @@ import { useTheme } from '@/lib/theme';
 import { messageText, type Message } from '@/store/chats';
 import { useSettings } from '@/store/settings';
 import { BrandIcon } from './BrandIcon';
+import { FileIcon } from './FileIcon';
 import { brandOfModel, friendlyModelName } from '@/lib/modelNames';
 import { RemoteReply } from './RemoteReply';
 import { Markdown } from './Markdown';
@@ -39,7 +40,7 @@ function Files({ files, align }: { files: FilePart[]; align: 'flex-end' | 'flex-
           key={`${f.file ?? f.name}-${i}`}
           style={[styles.fileChip, { backgroundColor: colors.surface, borderColor: colors.border }]}
         >
-          <Feather name="paperclip" size={15} color={colors.textSecondary} />
+          <FileIcon name={f.name} uri={f.file ? attachmentUri(f.file) : undefined} size={28} />
           <Text numberOfLines={1} style={[styles.fileName, { color: colors.text }]}>
             {f.name}
           </Text>
@@ -354,8 +355,9 @@ const styles = StyleSheet.create({
     maxWidth: '82%',
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingLeft: 7,
+    paddingRight: 12,
+    paddingVertical: 7,
   },
   fileName: { fontSize: 15, flexShrink: 1 },
   assistantRow: { paddingHorizontal: 16, marginVertical: 6, gap: 2 },

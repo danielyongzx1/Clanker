@@ -1,3 +1,13 @@
+# Clanker 1.2.0-beta.4
+
+- Real math in replies: TeX written as `$…$`, `$$…$$`, `\(…\)` or `\[…\]` is typeset instead of shown as source — display formulas set centered on their own line and scroll sideways when wider than the reply, inline ones sit on the sentence's baseline — rendered by MathJax, loaded the first time a reply contains math. A formula that can't be drawn shows its TeX, and one still streaming reads *Writing math…* rather than half-finished source.
+- Files a reply names open with a tap: paths and file names in prose, code spans and markdown links — `notes.md`, `assets/data.csv`, `[the report](report.pdf)` — resolve against the chat's workspace and open there; a bare name given without its folder matches the newest file of that name.
+- Files you recognize at a glance: chips and lists carry an icon of the file's kind in its colour — Word blue, Excel green, PowerPoint orange, PDF red, language logos for code — and images show a thumbnail of the picture itself instead of a paperclip.
+- On the project screen the composer no longer ends up partly under the keyboard in release builds: it pads by the keyboard's own animated height instead of the avoiding view's on-screen measurement.
+- Tapping or holding selectable text in a reply no longer makes the chat jump somewhere else: Android was scrolling the newly focused text into view inside the inverted list.
+
+---
+
 # Clanker 1.2.0-beta.3
 
 - Show models by name, not id: a new **User-friendly model names** toggle in Settings, on by default, replaces provider labels and raw model ids with brand marks and tidy names — `llama-swap/qwen3.8-flash-next-mxfp4` reads as Qwen3.8 Flash Next MXFP4 under a Qwen mark. The marks appear on the chat title, in the model sheet's rows and backend chips, under replies, and in the endpoints and backends lists, for hosted endpoints and remote backends alike; search still matches the raw id, and switching the toggle off restores plain names everywhere.

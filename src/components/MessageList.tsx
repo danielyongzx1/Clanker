@@ -48,6 +48,9 @@ export function MessageList({ conversationId, onRegenerate, topInset, bottomInse
         contentContainerStyle={{ paddingTop: 12, paddingBottom: 12 + topInset }}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
+        // Selectable text takes focus when tapped or held, and on Android the list then scrolls
+        // the focused text into view, which in an inverted list lands somewhere else entirely.
+        scrollsChildToFocus={false}
         onScroll={onScroll}
         scrollEventThrottle={64}
       />
