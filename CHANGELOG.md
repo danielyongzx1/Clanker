@@ -1,58 +1,35 @@
-# Clanker 1.2.0-beta.4
+# Clanker 1.2.0
 
-- Real math in replies: TeX written as `$…$`, `$$…$$`, `\(…\)` or `\[…\]` is typeset instead of shown as source — display formulas set centered on their own line and scroll sideways when wider than the reply, inline ones sit on the sentence's baseline — rendered by MathJax, loaded the first time a reply contains math. A formula that can't be drawn shows its TeX, and one still streaming reads *Writing math…* rather than half-finished source.
-- Files a reply names open with a tap: paths and file names in prose, code spans and markdown links — `notes.md`, `assets/data.csv`, `[the report](report.pdf)` — resolve against the chat's workspace and open there; a bare name given without its folder matches the newest file of that name.
-- Files you recognize at a glance: chips and lists carry an icon of the file's kind in its colour — Word blue, Excel green, PowerPoint orange, PDF red, language logos for code — and images show a thumbnail of the picture itself instead of a paperclip.
-- On the project screen the composer no longer ends up partly under the keyboard in release builds: it pads by the keyboard's own animated height instead of the avoiding view's on-screen measurement.
-- Tapping or holding selectable text in a reply no longer makes the chat jump somewhere else: Android was scrolling the newly focused text into view inside the inverted list.
+Everything from the four 1.2.0 betas, now stable.
 
----
+## Chat with the agent on your computer
+- Add a **Hermes** or **DeepSeek Harness** running on another computer as a named **remote backend**, picked before the first message and locked to that chat: the agent works there while the phone follows — progress, approvals, its questions, cancellation — and follow-ups queue. Remote chats use the agent's own memory and history, so regeneration and local helper requests are off.
+- **Pair by QR code**: a bridge writes a private `pairing.html` whose code carries its addresses, token and identity, and **Scan QR code** in the backend editor fills it all in and tests the connection; rescanning a paired bridge's code updates that backend, keeping its chats, efforts and hidden models. Install the [hermes-clanker-bridge](https://github.com/danielyongzx1/hermes-clanker-bridge) plugin from Hermes's Plugins or the standalone [dsh-clanker-bridge](https://github.com/danielyongzx1/dsh-clanker-bridge) on Harness Desktop, and the pairing code shows itself. Pairing uses `expo-camera`, so it needs a new app build.
+- **Switch a remote chat's model** from the chat title any time after it starts; the change applies from the next message. The eye button in the backend editor hides models from the picker, and the full model catalogue is searchable.
+- Per-chat **reasoning effort** for both Hermes and Harness, and the existing meters — context usage, generation speed, cache hits — work on remote chats too.
+- **Send your documents** to the remote agent and **download what it makes**, versioned, up to 20 MB per file; an open remote chat's title lists its remote files.
+- Remote backends can carry several **LAN/VPN/HTTPS addresses**, probed with authenticated identity checks and safe failover; pick the backend from chips at the top of the model sheet, and manage them in their own Settings section with a dedicated editor — setup steps, a test button with a status card, a searchable default-model list.
 
-# Clanker 1.2.0-beta.3
-
-- Show models by name, not id: a new **User-friendly model names** toggle in Settings, on by default, replaces provider labels and raw model ids with brand marks and tidy names — `llama-swap/qwen3.8-flash-next-mxfp4` reads as Qwen3.8 Flash Next MXFP4 under a Qwen mark. The marks appear on the chat title, in the model sheet's rows and backend chips, under replies, and in the endpoints and backends lists, for hosted endpoints and remote backends alike; search still matches the raw id, and switching the toggle off restores plain names everywhere.
-- Simplify the chat title's model selector into a single pill carrying the mark and name; a long name now truncates with an ellipsis when a backend or memory icon makes the pill too wide.
-- Run in Expo Go without notifications crashing: `expo-notifications` loads only in development and release builds, and reply notifications simply stay quiet where the module isn't available.
-- Silence haptics where vibration is unavailable: taps and slider drags stay still on a device or build without the native module instead of surfacing an error.
-
----
-
-# Clanker 1.2.0-beta.2
-
-- Add the [hermes-clanker-bridge](https://github.com/danielyongzx1/hermes-clanker-bridge) Hermes plugin: install it from Hermes's Plugins and the gateway runs the bridge on Hermes's own Node, with the pairing QR code under Settings → Plugins in Hermes Desktop. It can take over a bridge run from `tools/remote-bridge`, keeping its chats. The bridge now loads its Harness adapter only for Harness, so a Hermes-only bridge needs no DeepSeek packages. The backend editor's setup steps point to the two plugins.
-- Pair or reconnect a Hermes or Harness backend by QR code: bridges write a private `pairing.html` whose code holds their addresses, token and identity, and **Scan QR code** in the backend editor fills in and tests the connection. A code from a bridge that's already saved updates that backend, keeping its chats, efforts and hidden models; the phone's camera can open the code in Clanker too. Adds `expo-camera`, so it needs a new app build.
-- Switch a Hermes or DeepSeek Harness chat to any of its backend's models after it starts, from the chat title; the change applies from the next message, and the model sheet still lists the chat's remote files below the models. Requires the updated bridge, which now accepts a model with each turn; bridges that only switch within a provider keep the chat on its provider, and older ones on its first model. Hide individual models from the picker with the eye button in the backend editor.
-- Tidy backend choice and setup: pick the backend from chips at the top of the model sheet instead of a link under the chat title, which now carries a server icon on remote chats; an open remote chat's title shows its locked model and remote files. Remote backends get their own Settings section and a dedicated add/edit screen laid out like the endpoint editor, with setup steps, a test button with a status card, a searchable default-model list and save from the header.
-
-- Move project and plugin links to `danielyongzx1`; check for app releases in both the new and the original Clanker repositories, taking the newest, so either account can publish updates.
-- Publish the standalone MIT-licensed [dsh-clanker-bridge](https://github.com/danielyongzx1/dsh-clanker-bridge) for new Harness Desktop devices, bundling the bridge and creating per-device pairing credentials without a Clanker checkout. Preserve existing checkout-based installations; document the separate dshmarket submission.
-- Add a local Harness Desktop plugin that starts/supervises its bridge and refreshes per-launch credentials while keeping saved chats bound to the same Desktop profile.
-- Add a Windows sign-in helper for the Hermes bridge using its existing persistent credentials.
-- Reconcile Harness journal snapshots periodically to recover missed completion events without repeating agent actions; retry transient Windows state-file replacement locks.
-
-- Enable DeepSeek Harness's advertised model-specific reasoning effort and defaults in the composer.
-- Display Harness context pressure, streamed generation speed and cache-hit statistics, preserving missing measurements and avoiding duplicate accounting after reconnects.
-
-- Enable per-chat Hermes reasoning effort, captured before submission and queueing.
-- Show Hermes context occupancy, native throughput and cache-hit statistics through the existing chat meters; add a backed-up Runs metrics compatibility update for Hermes 0.22.5.
-
-- Show Hermes's full authenticated model catalogue and select remote models from a searchable new-chat picker.
-- Add alternative LAN/VPN/HTTPS addresses to remote backends, with authenticated identity checks and safe receipt-based failover.
-- Add a backed-up Hermes Runs compatibility fix to forward emitted reasoning deltas while the turn is running.
-
-- Add named Hermes and DeepSeek Harness backends, selected before the first message and locked per chat.
-- Add a companion bridge with remote sessions, progress, approvals, clarification, cancellation and restart reconciliation without automatic turn replay.
-- Transfer original documents to the agent and download versioned generated/edited files, up to 20 MB per file.
-- Preserve built-in chats through migration. Remote chats use their agent's memory/history, queue follow-ups and disable regeneration and local helper requests.
-- Document remote host setup, compatible Harness client contracts, file retention and recovery.
-
-# Clanker 1.2.0-beta.1
-
-## Suggestions that write themselves
-- A new chat's starter prompts are now **generated by your model**, not a fixed list: four fresh conversation starters each time, picked up from what you've been working on lately
-- They draw on your **recent chats** — titles and short excerpts from your five most recent — while temporary and archived chats stay out of it, and with memory off they're generated from nothing but the model itself
-- Project chats get starters relevant to that project; switching model or project refreshes them
+## A new chat that starts itself
+- A new chat's starter prompts are now **generated by your model**, not a fixed list, drawing on titles and excerpts from your five most recent chats — temporary and archived chats stay out of it, and project chats get starters about the project
 - Tapping one drops the full prompt into the composer so you can edit before sending; the generation is a separate tool-free request to your own endpoint, and a failed or slow one just shows a retry row
+
+## Math that renders
+- TeX written as `$…$`, `$$…$$`, `\(…\)` or `\[…\]` is typeset instead of shown as source: display formulas set centered on their own line and scroll sideways when wider than the reply, inline ones sit on the sentence's baseline — rendered by MathJax, loaded the first time a reply contains math. A formula that can't be drawn shows its TeX, and one still streaming reads *Writing math…* rather than half-finished source.
+
+## Files you can tap and recognize
+- File names and paths a reply mentions — in prose, code spans or markdown links — resolve against the chat's workspace and **open with a tap**; a bare name given without its folder matches the newest file of that name.
+- Chips and lists carry an **icon of the file's kind in its colour** — Word blue, Excel green, PowerPoint orange, PDF red, language logos for code — and images show a **thumbnail** of the picture itself instead of a paperclip.
+
+## Models by name, not id
+- A new **User-friendly model names** toggle in Settings, on by default, replaces provider labels and raw model ids with brand marks and tidy names — `llama-swap/qwen3.8-flash-next-mxfp4` reads as Qwen3.8 Flash Next MXFP4 under a Qwen mark — on the chat title, in the model sheet's rows and backend chips, under replies, and in the endpoints and backends lists; search still matches the raw id.
+- The chat title's model selector is a single pill carrying the mark and name; a long name truncates with an ellipsis when a backend or memory icon makes it too wide.
+
+## Smaller things and fixes
+- Run in Expo Go without notifications crashing, and haptics stay silent on devices or builds without vibration instead of surfacing an error.
+- On the project screen the composer no longer ends up partly under the keyboard in release builds.
+- Tapping or holding selectable text in a reply no longer makes the chat jump somewhere else.
+- Project and plugin links move to `danielyongzx1`; app updates are checked in both the new and the original Clanker repositories, taking the newest, so either account can publish.
 
 ---
 
