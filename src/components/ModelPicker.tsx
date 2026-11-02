@@ -11,7 +11,7 @@ import { PROVIDER_LABELS } from '@/lib/providers';
 import { BrandIcon, type BrandId } from './BrandIcon';
 import { brandOfBackendKind, brandOfEndpoint, brandOfModel, friendlyModelName } from '@/lib/modelNames';
 import { useTheme } from '@/lib/theme';
-import { modelProvider } from '@/lib/remote/types';
+import { groupByProvider, groupLabel, isModelHidden, modelGroup, modelInGroup, modelProvider } from '@/lib/remote/types';
 import { useBackends } from '@/store/backends';
 import { useChats } from '@/store/chats';
 import { useSettings } from '@/store/settings';
@@ -163,7 +163,9 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
     // Bridges from before switching across providers keep a chat on the provider it started with.
     const provider = chatModel && backend.modelSwitching !== 'any' && modelProvider(chatModel);
     return backend.models.filter(
-      (m) => m === current || (!backend.hiddenModels?.includes(m) && (!provider || modelProvider(m) === provider))
+      (m) =>
+        m === current ||
+        (!isModelHidden(m, backend.hiddenModels, backend.hiddenProviders) && (!provider || modelProvider(m) === provider))
     );
   }, [remote, backend, remoteLocked, chatModel]);
 
@@ -173,19 +175,23 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
     const shown = (m: string, brand?: BrandId) => (friendly ? { display: friendlyModelName(m) || m, brand } : { display: m, brand: undefined as BrandId | undefined });
     if (remote) {
       if (!backend || remoteLocked) return [];
-      return [
-        {
-          key: backend.id,
+      const groups = groupByProvider(remoteModels);
+      // Several providers each get a heading; a backend with one keeps its own name over the list.
+      const grouped = groups.length > 1;
+      return groups
+        .map((g) => ({
+          key: `${backend.id}-${g.provider}`,
           // Friendly mode: the backend's mark carries the kind, so the text drops it.
-          title: friendly ? backend.name : `${backend.name} · ${BACKEND_LABELS[backend.kind]}`,
-          brand: friendly ? brandOfBackendKind(backend.kind) : undefined,
-          data: remoteModels
+          title: grouped ? groupLabel(g.provider) : friendly ? backend.name : `${backend.name} · ${BACKEND_LABELS[backend.kind]}`,
+          brand: friendly ? (grouped ? brandOfModel(g.provider) : brandOfBackendKind(backend.kind)) : undefined,
+          data: g.models
             .filter((m) => !q || m.toLowerCase().includes(q) || friendlyModelName(m).toLowerCase().includes(q))
             .map(
               (m): Choice => ({
                 key: m,
                 model: m,
-                ...shown(m, brandOfModel(m)),
+                // Under its provider's heading, a raw id drops the provider it repeats.
+                ...(grouped && !friendly && modelGroup(m) ? { display: modelInGroup(m), brand: undefined } : shown(m, brandOfModel(m))),
                 selected: (chatModel ?? backend.model) === m,
                 onPress: () =>
                   chatModel && conversationId
@@ -193,8 +199,8 @@ export function ModelPicker({ visible, onClose, conversationId }: Props) {
                     : useBackends.getState().save({ ...backend, model: m }),
               })
             ),
-        },
-      ];
+        }))
+        .filter((s) => s.data.length > 0);
     }
     return endpoints
       .map((e) => ({

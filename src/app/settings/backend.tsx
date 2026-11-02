@@ -8,7 +8,7 @@ import { QrScanner } from '@/components/QrScanner';
 import { bridgeAddresses } from '@/lib/remote/addresses';
 import { RemoteAdapter } from '@/lib/remote/client';
 import { pairingFromParams, parsePairingLink, type Pairing } from '@/lib/remote/pairing';
-import type { RemoteBackend } from '@/lib/remote/types';
+import { groupByProvider, groupLabel, isModelHidden, modelGroup, modelInGroup, type RemoteBackend } from '@/lib/remote/types';
 import { apiKeys } from '@/lib/storage';
 import { useTheme } from '@/lib/theme';
 import { useBackends } from '@/store/backends';
@@ -45,6 +45,9 @@ export default function BackendScreen() {
   const [models, setModels] = useState<string[]>(existing?.models ?? []);
   const [model, setModel] = useState(existing?.model ?? '');
   const [hidden, setHidden] = useState<string[]>(existing?.hiddenModels ?? []);
+  const [hiddenProviders, setHiddenProviders] = useState<string[]>(existing?.hiddenProviders ?? []);
+  // Providers whose models are listed; the one with the model for new chats starts open.
+  const [openProviders, setOpenProviders] = useState<string[]>(existing?.model ? [modelGroup(existing.model)] : []);
   const [modelFilter, setModelFilter] = useState('');
   const [busy, setBusy] = useState<'test' | 'save' | null>(null);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
@@ -90,13 +93,19 @@ export default function BackendScreen() {
       bridgeAddresses(draft);
       const info = await new RemoteAdapter(draft, fields.token.trim()).info();
       if (!info.models.length) throw new Error('The backend has no available models. Configure its model provider on the host first.');
-      const chosen = info.models.includes(model) ? model : (info.models.find((m) => !hidden.includes(m)) ?? info.models[0]);
+      const chosen = info.models.includes(model)
+        ? model
+        : (info.models.find((m) => !isModelHidden(m, hidden, hiddenProviders)) ?? info.models[0]);
       setModels(info.models);
       setModel(chosen);
+      setOpenProviders((open) => (open.includes(modelGroup(chosen)) ? open : [...open, modelGroup(chosen)]));
       if (save) {
         // Adding a bridge that's already saved updates that backend, so its chats carry on.
         const previous = existing ?? useBackends.getState().remotes.find((b) => b.bridgeId === info.bridgeId);
         const keepHidden = existing ? hidden : [...new Set([...(previous?.hiddenModels ?? []), ...hidden])];
+        const keepHiddenProviders = existing
+          ? hiddenProviders
+          : [...new Set([...(previous?.hiddenProviders ?? []), ...hiddenProviders])];
         const backend: RemoteBackend = {
           ...draft,
           id: previous?.id ?? `remote_${info.bridgeId}`,
@@ -110,6 +119,8 @@ export default function BackendScreen() {
           efforts: previous?.efforts,
           // The model for new chats is never hidden.
           hiddenModels: keepHidden.filter((m) => m !== chosen && info.models.includes(m)),
+          // A hidden provider still shows the model for new chats, so it stays hidden around it.
+          hiddenProviders: keepHiddenProviders.filter((p) => info.models.some((m) => modelGroup(m) === p)),
         };
         await apiKeys.set(`bridge_${backend.id}`, fields.token.trim());
         useBackends.getState().save(backend);
@@ -190,11 +201,24 @@ export default function BackendScreen() {
     setModel(m);
     setHidden((h) => h.filter((x) => x !== m));
   }, []);
+  const toggleProviderHidden = useCallback(
+    (p: string) => setHiddenProviders((h) => (h.includes(p) ? h.filter((x) => x !== p) : [...h, p])),
+    []
+  );
+  const toggleProviderOpen = useCallback(
+    (p: string) => setOpenProviders((o) => (o.includes(p) ? o.filter((x) => x !== p) : [...o, p])),
+    []
+  );
 
-  const visibleModels = useMemo(() => {
+  const searching = !!modelFilter.trim();
+  const groups = useMemo(() => {
     const q = modelFilter.trim().toLowerCase();
-    return q ? models.filter((m) => m.toLowerCase().includes(q)) : models;
+    return groupByProvider(models)
+      .map((g) => ({ ...g, total: g.models.length, models: q ? g.models.filter((m) => m.toLowerCase().includes(q)) : g.models }))
+      .filter((g) => g.models.length);
   }, [models, modelFilter]);
+  // One provider, or a search, lists everything there is to see.
+  const collapsible = !searching && groups.length > 1;
 
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: colors.background }}>
@@ -334,27 +358,32 @@ export default function BackendScreen() {
               {models.length > 10 && (
                 <Input value={modelFilter} onChangeText={setModelFilter} placeholder="Search models or providers" style={{ marginBottom: 8 }} />
               )}
-              <Section
-                inset={16}
-                footer="Tap a model to start new chats with it, or its eye to hide it from the model picker. From the chat title, a chat can switch to another of these models."
-              >
-                {visibleModels.slice(0, 200).map((m) => (
-                  <ModelRow
-                    key={m}
-                    model={m}
-                    selected={model === m}
-                    hidden={hidden.includes(m)}
-                    onSelect={selectModel}
-                    onToggleHidden={toggleHidden}
-                  />
-                ))}
-                {!visibleModels.length && <Row title="No models match" />}
-              </Section>
-              {visibleModels.length > 200 && (
-                <Text style={[styles.hint, { color: colors.textTertiary, marginTop: -20, marginBottom: 20 }]}>
-                  {visibleModels.length - 200} more. Search to find them.
-                </Text>
+              {groups.map((g) => (
+                <ProviderGroup
+                  key={g.provider}
+                  provider={g.provider}
+                  models={g.models}
+                  total={g.total}
+                  open={!collapsible || openProviders.includes(g.provider)}
+                  collapsible={collapsible}
+                  hidden={hiddenProviders.includes(g.provider)}
+                  selectedModel={model}
+                  hiddenModels={hidden}
+                  onToggleOpen={toggleProviderOpen}
+                  onToggleHidden={toggleProviderHidden}
+                  onSelectModel={selectModel}
+                  onToggleModelHidden={toggleHidden}
+                />
+              ))}
+              {!groups.length && (
+                <Section inset={16} style={{ marginBottom: 0 }}>
+                  <Row title="No models match" />
+                </Section>
               )}
+              <Text style={[styles.hint, { color: colors.textTertiary, marginBottom: 20 }]}>
+                Tap a model to start new chats with it, or its eye to hide it from the model picker. A provider&apos;s eye
+                hides all of its models. From the chat title, a chat can switch to another of these models.
+              </Text>
             </>
           )}
 
@@ -385,30 +414,135 @@ export default function BackendScreen() {
   );
 }
 
+/** Listed per provider; past this many rows a provider asks for a search instead. */
+const MAX_ROWS = 200;
+
+/**
+ * A provider's models under a heading: tap the heading to show or hide its models here, or its eye
+ * to keep the whole provider out of the model picker.
+ */
+const ProviderGroup = memo(function ProviderGroup({
+  provider,
+  models,
+  total,
+  open,
+  collapsible,
+  hidden,
+  selectedModel,
+  hiddenModels,
+  onToggleOpen,
+  onToggleHidden,
+  onSelectModel,
+  onToggleModelHidden,
+}: {
+  provider: string;
+  /** The provider's models that match the search. */
+  models: string[];
+  total: number;
+  open: boolean;
+  collapsible: boolean;
+  hidden: boolean;
+  selectedModel: string;
+  hiddenModels: string[];
+  onToggleOpen: (provider: string) => void;
+  onToggleHidden: (provider: string) => void;
+  onSelectModel: (model: string) => void;
+  onToggleModelHidden: (model: string) => void;
+}) {
+  const { colors } = useTheme();
+  const label = groupLabel(provider);
+  const shownCount = models.length === total ? `${total}` : `${models.length} of ${total}`;
+  return (
+    <View style={{ marginBottom: open ? 0 : 4 }}>
+      <View style={styles.groupHeader}>
+        <Pressable
+          onPress={() => onToggleOpen(provider)}
+          disabled={!collapsible}
+          accessibilityRole="button"
+          accessibilityLabel={`${label}, ${shownCount} models${hidden ? ', hidden' : ''}`}
+          accessibilityState={collapsible ? { expanded: open } : undefined}
+          style={({ pressed }) => [styles.groupTitle, pressed && { opacity: 0.6 }]}
+        >
+          {collapsible && (
+            <Feather
+              name="chevron-right"
+              size={15}
+              color={colors.textTertiary}
+              style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}
+            />
+          )}
+          <Text numberOfLines={1} style={[styles.groupName, { color: hidden ? colors.textTertiary : colors.textSecondary }]}>
+            {label}
+          </Text>
+          <Text style={{ color: colors.textTertiary, fontSize: 13 }}>{shownCount}</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => onToggleHidden(provider)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={hidden ? `Show ${label} models` : `Hide ${label} models`}
+          style={styles.groupEye}
+        >
+          <Feather name={hidden ? 'eye-off' : 'eye'} size={18} color={colors.textTertiary} />
+        </Pressable>
+      </View>
+      {open && (
+        <>
+          <Section inset={16} style={{ marginBottom: models.length > MAX_ROWS ? 0 : 16 }}>
+            {models.slice(0, MAX_ROWS).map((m) => (
+              <ModelRow
+                key={m}
+                model={m}
+                title={provider ? modelInGroup(m) : m}
+                selected={selectedModel === m}
+                hidden={hidden || hiddenModels.includes(m)}
+                // The provider's eye speaks for all of its models while it hides them.
+                canHide={!hidden}
+                onSelect={onSelectModel}
+                onToggleHidden={onToggleModelHidden}
+              />
+            ))}
+          </Section>
+          {models.length > MAX_ROWS && (
+            <Text style={[styles.hint, { color: colors.textTertiary, marginBottom: 16 }]}>
+              {models.length - MAX_ROWS} more. Search to find them.
+            </Text>
+          )}
+        </>
+      )}
+    </View>
+  );
+});
+
 /** A model in the list: tap to start new chats with it, or its eye to hide it from the model picker. */
 const ModelRow = memo(function ModelRow({
   model,
+  title,
   selected,
   hidden,
+  canHide,
   onSelect,
   onToggleHidden,
 }: {
   model: string;
+  title: string;
   selected: boolean;
   hidden: boolean;
+  canHide: boolean;
   onSelect: (model: string) => void;
   onToggleHidden: (model: string) => void;
 }) {
   const { colors } = useTheme();
+  // The model for new chats is always shown.
+  const hideable = canHide && !selected;
   return (
     <Row
-      title={model}
-      muted={hidden}
+      title={title}
+      muted={hidden && !selected}
       selected={selected}
       onPress={() => onSelect(model)}
-      // The model for new chats is always shown, so it has no hide button.
       trailing={
-        selected
+        !hideable
           ? undefined
           : () => (
               <Pressable
@@ -423,7 +557,7 @@ const ModelRow = memo(function ModelRow({
       }
       accessibilityRole="radio"
       accessibilityState={{ checked: selected }}
-      accessibilityActions={selected ? undefined : [{ name: 'toggleHidden', label: hidden ? 'Show in model list' : 'Hide from model list' }]}
+      accessibilityActions={hideable ? [{ name: 'toggleHidden', label: hidden ? 'Show in model list' : 'Hide from model list' }] : undefined}
       onAccessibilityAction={(e) => e.nativeEvent.actionName === 'toggleHidden' && onToggleHidden(model)}
     />
   );
@@ -453,6 +587,10 @@ const styles = StyleSheet.create({
     marginTop: 28,
   },
   status: { flexDirection: 'row', gap: 10, borderRadius: 12, padding: 12, marginTop: 12 },
+  groupHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4, marginBottom: 8, paddingHorizontal: 4 },
+  groupTitle: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 32 },
+  groupName: { flexShrink: 1, fontSize: 12, fontWeight: '600', letterSpacing: 0.6, textTransform: 'uppercase' },
+  groupEye: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   delete: { borderWidth: 0, marginTop: 16 },
   scan: { borderWidth: 0, marginTop: 20 },
 });
