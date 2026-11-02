@@ -9,6 +9,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { useShallow } from 'zustand/react/shallow';
 import { deleteQueued, sendQueuedNow, takeQueued } from '@/lib/chat';
 import type { AttachmentPart } from '@/lib/providers';
+import { splitQuotes } from '@/lib/quotes';
 import { useTheme } from '@/lib/theme';
 import type { ContextUsage } from '@/lib/usage';
 import { useChats } from '@/store/chats';
@@ -49,6 +50,9 @@ type Props = {
   conversationId?: string | null;
   draft: string;
   onChangeDraft: (text: string) => void;
+  /** Text picked from the chat to ask about, shown as pills in the box; the screen sends them with the message. */
+  quotes?: string[];
+  onChangeQuotes?: (quotes: string[]) => void;
   streaming: boolean;
   onSend: (text: string, attachments: AttachmentPart[]) => void;
   onStop: () => void;
@@ -67,6 +71,8 @@ export function ComposerDock({
   conversationId,
   draft,
   onChangeDraft,
+  quotes = [],
+  onChangeQuotes,
   streaming,
   onSend,
   onStop,
@@ -147,11 +153,22 @@ export function ComposerDock({
   const effortStyle = useAnimatedStyle(() => ({ opacity: effortFade.value }));
   const composerStyle = useAnimatedStyle(() => ({ opacity: 1 - effortFade.value }));
 
-  // Editing brings a queued message back into the box, after anything already being written there.
+  // Picking "Ask Clanker" on some text opens the box to ask about it.
+  const quoteCount = quotes.length;
+  const lastQuoteCount = useRef(quoteCount);
+  useEffect(() => {
+    if (quoteCount > lastQuoteCount.current) input.current?.focus();
+    lastQuoteCount.current = quoteCount;
+  }, [quoteCount]);
+
+  // Editing brings a queued message back into the box, after anything already being written there,
+  // and its quotes back among the pills.
   const editQueued = (id: string) => {
     const message = conversationId && takeQueued(conversationId, id);
     if (!message) return;
-    onChangeDraft([draft.trimEnd(), message.text].filter(Boolean).join('\n\n'));
+    const queued = onChangeQuotes ? splitQuotes(message.text) : { quotes: [], text: message.text };
+    onChangeDraft([draft.trimEnd(), queued.text].filter(Boolean).join('\n\n'));
+    if (queued.quotes.length) onChangeQuotes?.([...quotes, ...queued.quotes]);
     setAttachments((prev) => [...prev, ...message.attachments]);
     input.current?.focus();
   };
@@ -199,6 +216,8 @@ export function ComposerDock({
           <Composer
             text={draft}
             onChangeText={onChangeDraft}
+            quotes={quotes}
+            onRemoveQuote={(index) => onChangeQuotes?.(quotes.filter((_, i) => i !== index))}
             attachments={attachments}
             onChangeAttachments={setAttachments}
             placeholder={

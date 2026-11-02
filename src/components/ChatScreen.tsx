@@ -15,6 +15,7 @@ import { ModelPicker } from '@/components/ModelPicker';
 import { regenerate, stopStreaming, submitMessage } from '@/lib/chat';
 import { brandOfBackendKind, brandOfModel, friendlyModelName } from '@/lib/modelNames';
 import type { AttachmentPart } from '@/lib/providers';
+import { withQuotes } from '@/lib/quotes';
 import { useTheme } from '@/lib/theme';
 import { useContextUsage } from '@/lib/usage';
 import { useChats } from '@/store/chats';
@@ -83,6 +84,9 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
   const projectName = useProjects((s) => (projectId ? s.projects[projectId]?.name : undefined));
 
   const [draft, setDraft] = useState('');
+  // Text picked from the chat with "Ask Clanker", sent as quotes ahead of the next message.
+  const [quotes, setQuotes] = useState<string[]>([]);
+  const addQuote = useCallback((text: string) => setQuotes((prev) => (prev.includes(text) ? prev : [...prev, text])), []);
   const [pickerOpen, setPickerOpen] = useState(false);
   // The conversation runs under the floating header and composer; these are their measured
   // heights (fade included) so content can rest clear of them. The composer's is measured
@@ -124,14 +128,15 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
     (text: string, attachments: AttachmentPart[]) => {
       try {
         // While a reply runs, this queues the message or steers the reply with it.
-        const id = submitMessage(currentId, text, attachments);
+        const id = submitMessage(currentId, withQuotes(quotes, text), attachments);
         if (id !== currentId) open(id);
         setDraft('');
+        setQuotes([]);
       } catch (e) {
         reportSendError(e);
       }
     },
-    [currentId, open]
+    [currentId, open, quotes]
   );
 
   const onRegenerate = useCallback(
@@ -159,6 +164,7 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
             <MessageList
               conversationId={currentId}
               onRegenerate={remote ? undefined : onRegenerate}
+              onAsk={addQuote}
               topInset={topInset}
               bottomInset={bottomInset}
             />
@@ -181,6 +187,8 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
             conversationId={currentId}
             draft={draft}
             onChangeDraft={setDraft}
+            quotes={quotes}
+            onChangeQuotes={setQuotes}
             streaming={streaming}
             onSend={send}
             onStop={() => currentId && stopStreaming(currentId)}

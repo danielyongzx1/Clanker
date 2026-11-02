@@ -3,6 +3,7 @@ import { messageText, useChats } from '@/store/chats';
 import { useProjects } from '@/store/projects';
 import { useUI } from '@/store/ui';
 import type { AttachmentPart } from '@/lib/providers';
+import { firstLine } from '@/lib/quotes';
 import { flushJsonStorage } from '@/lib/storage';
 import { notifyReplyFinished } from '@/lib/notifications';
 import { RemoteAdapter } from './client';
@@ -50,7 +51,7 @@ export function sendRemoteMessage(id: string | null, text: string, attachments: 
       backendId: backend.id, remote: { bridgeId: backend.bridgeId, effort: resolveRemoteEffort(backend, backend.model)?.level, instructions: projectId ? useProjects.getState().projects[projectId]?.instructions ?? '' : '' }, memory: false,
       ...(useUI.getState().newChatProjectId ? { projectId: useUI.getState().newChatProjectId! } : {}),
     });
-    chats.rename(id, text.trim().split('\n')[0].slice(0, 60) || 'Attachment', true);
+    chats.rename(id, firstLine(text).slice(0, 60) || 'Attachment', true);
   }
   const chat = chats.conversations[id] ?? useChats.getState().conversations[id];
   if (!chat) throw new Error('Chat no longer exists.');

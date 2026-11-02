@@ -3,6 +3,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 import { useTheme } from '@/lib/theme';
+import { AskSelection } from '../../modules/clanker-selection';
 import { useChats, type Message } from '@/store/chats';
 import { MessageBubble } from './MessageBubble';
 
@@ -11,13 +12,15 @@ const NO_MESSAGES: Message[] = [];
 type Props = {
   conversationId: string;
   onRegenerate?: (messageId: string) => void;
+  /** Takes text the user selected in the chat and picked "Ask Clanker" for. */
+  onAsk: (text: string) => void;
   // Heights of the header and composer floating over the list, so content rests clear of them.
   // The composer's is a shared value: it follows the box's expand animation on the UI thread.
   topInset: number;
   bottomInset: SharedValue<number>;
 };
 
-export function MessageList({ conversationId, onRegenerate, topInset, bottomInset }: Props) {
+export function MessageList({ conversationId, onRegenerate, onAsk, topInset, bottomInset }: Props) {
   const { colors } = useTheme();
   const messages = useChats((s) => s.conversations[conversationId]?.messages ?? NO_MESSAGES);
   const listRef = useRef<FlatList<Message>>(null);
@@ -32,28 +35,38 @@ export function MessageList({ conversationId, onRegenerate, topInset, bottomInse
   const spacerStyle = useAnimatedStyle(() => ({ height: bottomInset.value }));
   const jumpStyle = useAnimatedStyle(() => ({ transform: [{ translateY: -bottomInset.value }] }));
 
+  const list = (
+    <FlatList
+      ref={listRef}
+      inverted
+      data={data}
+      keyExtractor={(m) => m.id}
+      renderItem={({ item }) => (
+        <MessageBubble conversationId={conversationId} message={item} isLast={item.id === lastAssistantId} onRegenerate={onRegenerate} onAsk={onAsk} />
+      )}
+      // Inverted flips the content, so its top padding and header show at the bottom and vice
+      // versa. The header is the composer's room, sized without re-rendering the list.
+      ListHeaderComponent={<Animated.View style={spacerStyle} />}
+      contentContainerStyle={{ paddingTop: 12, paddingBottom: 12 + topInset }}
+      keyboardDismissMode="interactive"
+      keyboardShouldPersistTaps="handled"
+      // Selectable text takes focus when tapped or held, and on Android the list then scrolls
+      // the focused text into view, which in an inverted list lands somewhere else entirely.
+      scrollsChildToFocus={false}
+      onScroll={onScroll}
+      scrollEventThrottle={64}
+    />
+  );
+
   return (
     <View style={styles.container}>
-      <FlatList
-        ref={listRef}
-        inverted
-        data={data}
-        keyExtractor={(m) => m.id}
-        renderItem={({ item }) => (
-          <MessageBubble conversationId={conversationId} message={item} isLast={item.id === lastAssistantId} onRegenerate={onRegenerate} />
-        )}
-        // Inverted flips the content, so its top padding and header show at the bottom and vice
-        // versa. The header is the composer's room, sized without re-rendering the list.
-        ListHeaderComponent={<Animated.View style={spacerStyle} />}
-        contentContainerStyle={{ paddingTop: 12, paddingBottom: 12 + topInset }}
-        keyboardDismissMode="interactive"
-        keyboardShouldPersistTaps="handled"
-        // Selectable text takes focus when tapped or held, and on Android the list then scrolls
-        // the focused text into view, which in an inverted list lands somewhere else entirely.
-        scrollsChildToFocus={false}
-        onScroll={onScroll}
-        scrollEventThrottle={64}
-      />
+      {AskSelection ? (
+        <AskSelection style={styles.container} onAsk={(e) => onAsk(e.nativeEvent.text)}>
+          {list}
+        </AskSelection>
+      ) : (
+        list
+      )}
       {showJump && (
         <Animated.View style={[styles.jumpSlot, jumpStyle]}>
           <Pressable

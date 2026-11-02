@@ -7,6 +7,7 @@ import { ensureMemoryBase, extractMemories, memoryOn } from './memory';
 import { askToNotify, notifyReplyFinished } from './notifications';
 import { workspaceFor } from './projects';
 import { parsePartialJson } from './partialJson';
+import { firstLine } from './quotes';
 import { getAdapter, ProviderError, type AttachmentPart, type Endpoint, type ToolCallDraft, type ToolPart } from './providers';
 import { recordStep, stepStats } from './stats';
 import { apiKeys, uid } from './storage';
@@ -38,7 +39,7 @@ function draftInput(args: string): Record<string, unknown> {
 }
 
 function fallbackTitle(text: string) {
-  const line = text.trim().split('\n')[0];
+  const line = firstLine(text);
   return line ? (line.length > 40 ? line.slice(0, 40).trimEnd() + '…' : line) : 'Image';
 }
 

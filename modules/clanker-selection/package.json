@@ -1,0 +1,7 @@
+{
+  "name": "clanker-selection",
+  "version": "1.0.0",
+  "description": "Adds Ask Clanker to the text selection menu of text inside it (Android only).",
+  "main": "index.ts",
+  "private": true
+}

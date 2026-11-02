@@ -42,6 +42,9 @@ export function composerMargin(progress: number) {
 type Props = {
   text: string;
   onChangeText: (text: string) => void;
+  /** Text picked from the chat to ask about, shown as pills above the text. */
+  quotes: string[];
+  onRemoveQuote: (index: number) => void;
   /** Held by the dock, so a queued message can be brought back here to edit. */
   attachments: AttachmentPart[];
   onChangeAttachments: Dispatch<SetStateAction<AttachmentPart[]>>;
@@ -65,6 +68,8 @@ type Props = {
 export function Composer({
   text,
   onChangeText,
+  quotes,
+  onRemoveQuote,
   attachments,
   onChangeAttachments: setAttachments,
   placeholder,
@@ -81,7 +86,7 @@ export function Composer({
   const [importing, setImporting] = useState(false);
   const images = attachments.filter((a): a is ImagePart => a.type === 'image');
   const files = attachments.filter((a): a is FilePart => a.type === 'file');
-  const canSend = !importing && (text.trim().length > 0 || attachments.length > 0);
+  const canSend = !importing && (text.trim().length > 0 || attachments.length > 0 || quotes.length > 0);
   // While a reply streams, sending queues or steers, and Stop stays beside Send.
   const bothButtons = streaming && canSend;
   // A zero-impact overlay inside the box that we can measure (Animated.View refs are awkwardly
@@ -186,8 +191,24 @@ export function Composer({
         />
       )}
       <Animated.View ref={box} style={[styles.box, { backgroundColor: colors.composer }, boxStyle]}>
-        {(attachments.length > 0 || importing) && (
+        {(attachments.length > 0 || quotes.length > 0 || importing) && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbs}>
+            {quotes.map((q, i) => (
+              <View key={`${i}-${q}`} style={[styles.quote, { backgroundColor: colors.surface }]}>
+                <Feather name="corner-down-right" size={14} color={colors.textSecondary} />
+                <Text numberOfLines={1} style={[styles.quoteText, { color: colors.text }]}>
+                  {q.replace(/\s+/g, ' ')}
+                </Text>
+                <Pressable
+                  onPress={() => onRemoveQuote(i)}
+                  hitSlop={8}
+                  style={({ pressed }) => pressed && { opacity: 0.5 }}
+                  accessibilityLabel="Remove quote"
+                >
+                  <Feather name="x" size={15} color={colors.textSecondary} />
+                </Pressable>
+              </View>
+            ))}
             {images.map((img) => (
               <View key={img.file}>
                 <Image source={{ uri: attachmentUri(img.file) }} style={styles.thumb} contentFit="cover" />
@@ -318,6 +339,18 @@ const styles = StyleSheet.create({
     paddingRight: 14,
   },
   fileChipName: { fontSize: 14, flexShrink: 1 },
+  quote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    height: 32,
+    maxWidth: 220,
+    borderRadius: 16,
+    paddingLeft: 10,
+    paddingRight: 9,
+  },
+  quoteText: { fontSize: 14, flexShrink: 1 },
   loading: { alignItems: 'center', justifyContent: 'center' },
   remove: {
     position: 'absolute',

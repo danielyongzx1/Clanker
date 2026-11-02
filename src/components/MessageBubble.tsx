@@ -7,6 +7,7 @@ import { memo, useMemo, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { attachmentUri } from '@/lib/attachments';
 import type { ContentPart, FilePart, ImagePart, ToolPart } from '@/lib/providers';
+import { splitQuotes } from '@/lib/quotes';
 import { sitesOf, sourcesOf } from '@/lib/sources';
 import { formatStats } from '@/lib/stats';
 import { useTheme } from '@/lib/theme';
@@ -16,6 +17,7 @@ import { BrandIcon } from './BrandIcon';
 import { FileIcon } from './FileIcon';
 import { brandOfModel, friendlyModelName } from '@/lib/modelNames';
 import { RemoteReply } from './RemoteReply';
+import { SelectText } from './SelectText';
 import { Markdown } from './Markdown';
 import { NestedScroll } from './NestedScroll';
 import { QuestionCard } from './QuestionCard';
@@ -29,6 +31,8 @@ type Props = {
   message: Message;
   isLast: boolean;
   onRegenerate?: (messageId: string) => void;
+  /** Takes text picked with "Ask Clanker" in the reply's select-text view. */
+  onAsk?: (text: string) => void;
 };
 
 function Files({ files, align }: { files: FilePart[]; align: 'flex-end' | 'flex-start' }) {
@@ -191,9 +195,10 @@ function Thoughts({ text, ms, live }: { text: string; ms?: number; live: boolean
   );
 }
 
-function MessageBubbleInner({ conversationId, message, isLast, onRegenerate }: Props) {
+function MessageBubbleInner({ conversationId, message, isLast, onRegenerate, onAsk }: Props) {
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
+  const [selecting, setSelecting] = useState(false);
   const showSpeed = useSettings((s) => s.decodeSpeed);
   const showCache = useSettings((s) => s.cacheHits);
   const friendly = useSettings((s) => s.friendlyModelNames);
@@ -210,14 +215,24 @@ function MessageBubbleInner({ conversationId, message, isLast, onRegenerate }: P
   };
 
   if (message.role === 'user') {
+    // Text the user picked from the chat to ask about rides at the top of the message as quotes.
+    const { quotes, text: asked } = splitQuotes(text);
     return (
       <View style={styles.userRow}>
         <Images images={images} align="flex-end" />
         <Files files={files} align="flex-end" />
-        {!!text && (
+        {quotes.map((q, i) => (
+          <View key={i} style={[styles.quote, { backgroundColor: colors.surface }]}>
+            <Feather name="corner-down-right" size={14} color={colors.textSecondary} style={styles.quoteIcon} />
+            <Text numberOfLines={2} style={[styles.quoteText, { color: colors.textSecondary }]}>
+              {q.replace(/\s+/g, ' ')}
+            </Text>
+          </View>
+        ))}
+        {!!asked && (
           <Pressable onLongPress={copy} style={[styles.userBubble, { backgroundColor: colors.userBubble }]}>
             <Text selectable style={[styles.userText, { color: colors.text }]}>
-              {text}
+              {asked}
             </Text>
           </Pressable>
         )}
@@ -305,6 +320,11 @@ function MessageBubbleInner({ conversationId, message, isLast, onRegenerate }: P
               <Feather name={copied ? 'check' : 'copy'} size={16} color={colors.textSecondary} />
             </Pressable>
           )}
+          {!!text && (
+            <Pressable onPress={() => setSelecting(true)} hitSlop={8} style={styles.action} accessibilityLabel="Select text">
+              <Feather name="type" size={16} color={colors.textSecondary} />
+            </Pressable>
+          )}
           {isLast && onRegenerate && (
             <Pressable onPress={() => onRegenerate(message.id)} hitSlop={8} style={styles.action}>
               <Feather name="refresh-cw" size={16} color={colors.textSecondary} />
@@ -331,6 +351,7 @@ function MessageBubbleInner({ conversationId, message, isLast, onRegenerate }: P
           )}
         </View>
       )}
+      {!!text && <SelectText text={text} visible={selecting} onClose={() => setSelecting(false)} onAsk={onAsk} />}
       {!!message.memorySaved?.length && (
         <Pressable
           onPress={() => router.push('/settings/memory')}
@@ -354,6 +375,17 @@ const styles = StyleSheet.create({
   userRow: { alignItems: 'flex-end', paddingHorizontal: 16, marginVertical: 10, gap: 6 },
   userBubble: { maxWidth: '82%', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10 },
   userText: { fontSize: 16, lineHeight: 23 },
+  quote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    maxWidth: '82%',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  quoteIcon: { marginTop: 3 },
+  quoteText: { fontSize: 14, lineHeight: 20, flexShrink: 1 },
   images: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, maxWidth: '82%' },
   fileChip: {
     flexDirection: 'row',

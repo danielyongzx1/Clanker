@@ -2,6 +2,7 @@ import Feather from '@expo/vector-icons/Feather';
 import * as Haptics from '@/lib/haptics';
 import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 import Animated, { FadeIn, useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
+import { firstLine } from '@/lib/quotes';
 import { useTheme } from '@/lib/theme';
 import type { QueuedMessage } from '@/store/chats';
 import { composerMargin } from './Composer';
@@ -26,7 +27,7 @@ type Props = {
 };
 
 function summary(message: QueuedMessage) {
-  const line = message.text.trim().split('\n')[0];
+  const line = firstLine(message.text);
   if (line) return line;
   const n = message.attachments.length;
   return `${n} attachment${n === 1 ? '' : 's'}`;
