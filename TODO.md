@@ -13,3 +13,4 @@ Add permissions.
 Add general custom instructions.
 Add plugin support.
 Add codex support. 
+Optimise chat loading.
