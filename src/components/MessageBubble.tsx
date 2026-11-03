@@ -17,7 +17,7 @@ import { BrandIcon } from './BrandIcon';
 import { FileIcon } from './FileIcon';
 import { brandOfModel, friendlyModelName } from '@/lib/modelNames';
 import { RemoteReply } from './RemoteReply';
-import { SelectText } from './SelectText';
+import { areasSelect, SelectionArea } from './SelectionArea';
 import { Markdown } from './Markdown';
 import { NestedScroll } from './NestedScroll';
 import { QuestionCard } from './QuestionCard';
@@ -31,8 +31,6 @@ type Props = {
   message: Message;
   isLast: boolean;
   onRegenerate?: (messageId: string) => void;
-  /** Takes text picked with "Ask Clanker" in the reply's select-text view. */
-  onAsk?: (text: string) => void;
 };
 
 function Files({ files, align }: { files: FilePart[]; align: 'flex-end' | 'flex-start' }) {
@@ -184,21 +182,20 @@ function Thoughts({ text, ms, live }: { text: string; ms?: number; live: boolean
       {open && (
         // Capped in height, so while thoughts stream it follows their end until the user drags back to read.
         <NestedScroll style={styles.thoughts} follow={live}>
-          <View style={[styles.thoughtsInner, { borderLeftColor: colors.border }]}>
-            <Text selectable style={[styles.thoughtsText, { color: colors.textSecondary }]}>
+          <SelectionArea style={[styles.thoughtsInner, { borderLeftColor: colors.border }]}>
+            <Text selectable={!areasSelect} style={[styles.thoughtsText, { color: colors.textSecondary }]}>
               {text}
             </Text>
-          </View>
+          </SelectionArea>
         </NestedScroll>
       )}
     </>
   );
 }
 
-function MessageBubbleInner({ conversationId, message, isLast, onRegenerate, onAsk }: Props) {
+function MessageBubbleInner({ conversationId, message, isLast, onRegenerate }: Props) {
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
-  const [selecting, setSelecting] = useState(false);
   const showSpeed = useSettings((s) => s.decodeSpeed);
   const showCache = useSettings((s) => s.cacheHits);
   const friendly = useSettings((s) => s.friendlyModelNames);
@@ -230,10 +227,13 @@ function MessageBubbleInner({ conversationId, message, isLast, onRegenerate, onA
           </View>
         ))}
         {!!asked && (
-          <Pressable onLongPress={copy} style={[styles.userBubble, { backgroundColor: colors.userBubble }]}>
-            <Text selectable style={[styles.userText, { color: colors.text }]}>
-              {asked}
-            </Text>
+          // Held, the text selects where it can; otherwise holding copies it all.
+          <Pressable onLongPress={areasSelect ? undefined : copy} style={[styles.userBubble, { backgroundColor: colors.userBubble }]}>
+            <SelectionArea>
+              <Text selectable={!areasSelect} style={[styles.userText, { color: colors.text }]}>
+                {asked}
+              </Text>
+            </SelectionArea>
           </Pressable>
         )}
       </View>
@@ -320,11 +320,6 @@ function MessageBubbleInner({ conversationId, message, isLast, onRegenerate, onA
               <Feather name={copied ? 'check' : 'copy'} size={16} color={colors.textSecondary} />
             </Pressable>
           )}
-          {!!text && (
-            <Pressable onPress={() => setSelecting(true)} hitSlop={8} style={styles.action} accessibilityLabel="Select text">
-              <Feather name="type" size={16} color={colors.textSecondary} />
-            </Pressable>
-          )}
           {isLast && onRegenerate && (
             <Pressable onPress={() => onRegenerate(message.id)} hitSlop={8} style={styles.action}>
               <Feather name="refresh-cw" size={16} color={colors.textSecondary} />
@@ -351,7 +346,6 @@ function MessageBubbleInner({ conversationId, message, isLast, onRegenerate, onA
           )}
         </View>
       )}
-      {!!text && <SelectText text={text} visible={selecting} onClose={() => setSelecting(false)} onAsk={onAsk} />}
       {!!message.memorySaved?.length && (
         <Pressable
           onPress={() => router.push('/settings/memory')}

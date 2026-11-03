@@ -12,6 +12,7 @@ import type { Workspace } from '@/lib/workspace';
 import { useWorkspace } from '@/lib/useWorkspace';
 import { CodeBlock } from './CodeBlock';
 import { NestedScroll } from './NestedScroll';
+import { areasSelect, SelectionArea, useSelectable } from './SelectionArea';
 
 const ICONS: Record<string, keyof typeof Feather.glyphMap> = {
   ask_user: 'help-circle',
@@ -72,6 +73,7 @@ const basename = (path: string) => path.split('/').pop() ?? path;
 /** The part of the call worth showing in full: the script, the command, or the written content. */
 function CallInput({ part }: { part: ToolPart }) {
   const { colors } = useTheme();
+  const selectable = useSelectable();
   const input = part.input;
   // While the model is still writing the call, the code shows its growing end.
   const live = part.status === 'writing';
@@ -82,7 +84,7 @@ function CallInput({ part }: { part: ToolPart }) {
       .map((q) => [q.question, ...q.options.map((o) => `  · ${o.label}`)].join('\n'))
       .join('\n\n');
     return (
-      <Text selectable style={[styles.summary, { color: colors.textSecondary }]}>
+      <Text selectable={selectable} style={[styles.summary, { color: colors.textSecondary }]}>
         {text}
       </Text>
     );
@@ -109,7 +111,7 @@ function CallInput({ part }: { part: ToolPart }) {
   }
   const json = JSON.stringify(input, null, 2);
   return json === '{}' ? null : (
-    <Text selectable style={[styles.mono, { color: colors.textSecondary }]}>
+    <Text selectable={selectable} style={[styles.mono, { color: colors.textSecondary }]}>
       {json}
     </Text>
   );
@@ -192,10 +194,10 @@ function ToolCallInner({ part }: { part: ToolPart }) {
       </Pressable>
 
       {open && (
-        <View style={[styles.details, { borderLeftColor: colors.border }]}>
+        <SelectionArea style={[styles.details, { borderLeftColor: colors.border }]}>
           {part.name === 'compress' && Array.isArray(part.input.ranges) ? (
             (part.input.ranges as { from?: string; to?: string; summary?: string }[]).map((r, i) => (
-              <Text key={i} selectable style={[styles.summary, { color: colors.textSecondary }]}>
+              <Text key={i} selectable={!areasSelect} style={[styles.summary, { color: colors.textSecondary }]}>
                 <Text style={{ fontWeight: '600' }}>{r.to && r.to !== r.from ? `${r.from}–${r.to}` : r.from}: </Text>
                 {r.summary}
               </Text>
@@ -205,12 +207,12 @@ function ToolCallInner({ part }: { part: ToolPart }) {
           )}
           {output != null && (
             <NestedScroll style={[styles.output, { backgroundColor: colors.codeBg }]} contentContainerStyle={styles.outputContent}>
-              <Text selectable style={[styles.mono, { color: failed ? colors.danger : colors.text }]}>
+              <Text selectable={!areasSelect} style={[styles.mono, { color: failed ? colors.danger : colors.text }]}>
                 {output.length > 20_000 ? output.slice(0, 20_000) + '\n…' : output || '(no output)'}
               </Text>
             </NestedScroll>
           )}
-        </View>
+        </SelectionArea>
       )}
 
       {!!part.images?.length && (

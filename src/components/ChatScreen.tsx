@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, AppState, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useDerivedValue, useSharedValue } from 'react-native-reanimated';
@@ -24,6 +24,7 @@ import { useSettings } from '@/store/settings';
 import { useUI } from '@/store/ui';
 import { useBackends } from '@/store/backends';
 import { refreshRemoteBackend, resumeRemoteChat } from '@/lib/remote/chat';
+import { addAskListener } from '../../modules/clanker-selection';
 
 // How far the header fade reaches past its controls into the conversation.
 const HEADER_FADE = 16;
@@ -87,6 +88,8 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
   // Text picked from the chat with "Ask Clanker", sent as quotes ahead of the next message.
   const [quotes, setQuotes] = useState<string[]>([]);
   const addQuote = useCallback((text: string) => setQuotes((prev) => (prev.includes(text) ? prev : [...prev, text])), []);
+  // Only the screen in front takes them, with a project chat open over the main one.
+  useFocusEffect(useCallback(() => addAskListener(addQuote), [addQuote]));
   const [pickerOpen, setPickerOpen] = useState(false);
   // The conversation runs under the floating header and composer; these are their measured
   // heights (fade included) so content can rest clear of them. The composer's is measured
@@ -164,7 +167,6 @@ export function ChatScreen({ onMenu, onBack }: { onMenu?: () => void; onBack?: (
             <MessageList
               conversationId={currentId}
               onRegenerate={remote ? undefined : onRegenerate}
-              onAsk={addQuote}
               topInset={topInset}
               bottomInset={bottomInset}
             />

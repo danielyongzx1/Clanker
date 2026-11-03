@@ -11,12 +11,14 @@ import { CodeBlock } from './CodeBlock';
 import { ChatImage, ImageCards, parseImages } from './ImageCards';
 import { MarkdownTable } from './MarkdownTable';
 import { InlineMath, MathBlock } from './MathView';
+import { SelectionArea, useSelectable } from './SelectionArea';
+import { SKIP_SELECTION } from '../../modules/clanker-selection';
 
 /** Shown in place of a chart or image block whose JSON is still streaming in. */
 function Pending({ label }: { label: string }) {
   const { colors } = useTheme();
   return (
-    <View style={[styles.pending, { backgroundColor: colors.surface }]}>
+    <View nativeID={SKIP_SELECTION} style={[styles.pending, { backgroundColor: colors.surface }]}>
       <Text style={{ color: colors.textTertiary, fontSize: 14 }}>{label}</Text>
     </View>
   );
@@ -28,9 +30,11 @@ class ChatRenderer extends Renderer {
     private live: boolean,
     /** Finds the workspace files the text names, which then open on a tap; null without a workspace. */
     private mentions: FileMentions | null,
-    private linkColor: string
+    private linkColor: string,
+    /** Off inside a selection area, which selects the text across blocks itself. */
+    private textSelectable: boolean
   ) {
-    super();
+    super({ selectable: textSelectable });
   }
 
   private open(path: string) {
@@ -64,11 +68,24 @@ class ChatRenderer extends Renderer {
     // while text after them streams in.
     if (lang === MATH_LANG) return <MathBlock key={this.getKey()} tex={text} />;
     if (lang === PENDING_MATH_LANG) return <Pending key={this.getKey()} label="Writing math…" />;
+    // Selections pass over charts' and cards' labels.
     if (lang === 'chart') {
-      if (parseChart(text)) return <Chart key={this.getKey()} source={text} />;
+      if (parseChart(text)) {
+        return (
+          <View key={this.getKey()} nativeID={SKIP_SELECTION}>
+            <Chart source={text} />
+          </View>
+        );
+      }
       if (this.live) return <Pending key={this.getKey()} label="Drawing chart…" />;
     } else if (lang === 'images') {
-      if (parseImages(text)) return <ImageCards key={this.getKey()} source={text} />;
+      if (parseImages(text)) {
+        return (
+          <View key={this.getKey()} nativeID={SKIP_SELECTION}>
+            <ImageCards source={text} />
+          </View>
+        );
+      }
       if (this.live) return <Pending key={this.getKey()} label="Loading images…" />;
     }
     return <CodeBlock key={this.getKey()} code={text} language={language} streaming={this.live} />;
@@ -84,7 +101,7 @@ class ChatRenderer extends Renderer {
     if (!path) return super.codespan(text, styles);
     return (
       <Text
-        selectable
+        selectable={this.textSelectable}
         key={this.getKey()}
         accessibilityRole="link"
         onPress={() => this.open(path)}
@@ -99,7 +116,7 @@ class ChatRenderer extends Renderer {
     const parts = typeof text === 'string' && this.mentions ? this.mentions.split(text) : null;
     if (!parts || parts.length < 2) return super.text(text, styles);
     return (
-      <Text selectable key={this.getKey()} style={styles}>
+      <Text selectable={this.textSelectable} key={this.getKey()} style={styles}>
         {parts.map((part, i) =>
           typeof part === 'string' ? (
             part
@@ -118,7 +135,7 @@ class ChatRenderer extends Renderer {
     const path = /^(https?|mailto|tel):/i.test(href) ? null : this.mentions?.resolve(href);
     if (!path) return super.link(children, href, styles, title);
     return (
-      <Text selectable key={this.getKey()} accessibilityRole="link" onPress={() => this.open(path)} style={styles}>
+      <Text selectable={this.textSelectable} key={this.getKey()} accessibilityRole="link" onPress={() => this.open(path)} style={styles}>
         {children}
       </Text>
     );
@@ -201,8 +218,12 @@ const MarkdownBlock = memo(function MarkdownBlock({ value, live }: { value: stri
     [colors]
   );
   const ws = useWorkspace();
+  const selectable = useSelectable();
   // Made again when the reply finishes (live turns off), so files written while it streamed are found.
-  const renderer = useMemo(() => new ChatRenderer(live, ws && new FileMentions(ws), colors.link), [live, ws, colors.link]);
+  const renderer = useMemo(
+    () => new ChatRenderer(live, ws && new FileMentions(ws), colors.link, selectable),
+    [live, ws, colors.link, selectable]
+  );
   // useMarkdown parses during this render whenever the text changed.
   renderer.reset();
   const elements = useMarkdown(value, { colorScheme: scheme, styles, theme, renderer });
@@ -226,11 +247,11 @@ function MarkdownInner({ value: raw, live = false }: { value: string; live?: boo
     setSplit({ text: value, blocks });
   }
   return (
-    <View>
+    <SelectionArea>
       {blocks.map((block, i) => (
         <MarkdownBlock key={i} value={block} live={live && i === blocks.length - 1} />
       ))}
-    </View>
+    </SelectionArea>
   );
 }
 

@@ -4,6 +4,7 @@ import { SvgXml } from 'react-native-svg';
 import { texToSvg } from '@/lib/math';
 import { fonts, useTheme } from '@/lib/theme';
 import { HorizontalScroll } from './HorizontalScroll';
+import { useSelectable } from './SelectionArea';
 
 // The reply text's size; one em of the formula.
 const EM = 16;
@@ -11,10 +12,11 @@ const EM = 16;
 /** A formula set on its own line, centered, scrolling sideways when wider than the reply. */
 export const MathBlock = memo(function MathBlock({ tex }: { tex: string }) {
   const { colors } = useTheme();
+  const selectable = useSelectable();
   const svg = texToSvg(tex, true);
   if (!svg) {
     return (
-      <Text selectable style={[styles.source, { color: colors.textSecondary }]}>
+      <Text selectable={selectable} style={[styles.source, { color: colors.textSecondary }]}>
         {tex}
       </Text>
     );

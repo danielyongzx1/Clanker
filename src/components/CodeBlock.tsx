@@ -5,7 +5,9 @@ import { common, createLowlight } from 'lowlight';
 import { memo, useMemo, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { fonts, useTheme } from '@/lib/theme';
+import { SKIP_SELECTION } from '../../modules/clanker-selection';
 import { HorizontalScroll } from './HorizontalScroll';
+import { useSelectable } from './SelectionArea';
 
 const lowlight = createLowlight(common);
 
@@ -145,6 +147,7 @@ function CodeBlockInner({
 }) {
   const { colors, scheme } = useTheme();
   const palette = palettes[scheme];
+  const selectable = useSelectable();
   const [copied, setCopied] = useState(false);
   const lang = language?.trim().split(/\s+/)[0]?.toLowerCase() || undefined;
   const text = code.replace(/\n$/, '');
@@ -171,7 +174,7 @@ function CodeBlockInner({
 
   return (
     <View style={[styles.container, { backgroundColor: colors.codeBg, borderColor: colors.border }]}>
-      <View style={[styles.header, { backgroundColor: colors.codeHeader }]}>
+      <View nativeID={SKIP_SELECTION} style={[styles.header, { backgroundColor: colors.codeHeader }]}>
         <Text style={[styles.lang, { color: colors.textSecondary }]}>{lang ?? 'code'}</Text>
         <Pressable onPress={copy} hitSlop={8} style={styles.copy}>
           <Feather name={copied ? 'check' : 'copy'} size={13} color={colors.textSecondary} />
@@ -179,7 +182,7 @@ function CodeBlockInner({
         </Pressable>
       </View>
       <HorizontalScroll contentContainerStyle={styles.body}>
-        <Text selectable style={[styles.code, { color: palette.base }]}>
+        <Text selectable={selectable} style={[styles.code, { color: palette.base }]}>
           {live ? tail(text) : highlighted}
           {!live && text.slice(settled.length)}
         </Text>

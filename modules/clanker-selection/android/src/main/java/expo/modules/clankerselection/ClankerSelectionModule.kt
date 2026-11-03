@@ -1,76 +1,91 @@
 package expo.modules.clankerselection
 
 import android.content.Context
-import android.graphics.Rect
-import android.view.ActionMode
-import android.view.Menu
-import android.view.MenuItem
-import android.view.View
-import android.widget.TextView
+import android.os.SystemClock
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
+import android.view.ViewConfiguration
+import com.facebook.react.uimanager.events.NativeGestureUtil
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
-
-// Far from the android.R.id values the text toolbar's own items use.
-private const val ASK_ID = 0x436c6b
-// Right after Copy (5), ahead of Share (7) and Select all (8).
-private const val ASK_ORDER = 6
+import kotlin.math.hypot
 
 /**
- * Adds "Ask Clanker" to the selection toolbar of selectable text anywhere inside it. A TextView
- * starts that toolbar through its parents, so this takes the request on the way up, wraps the
- * toolbar's callback with the extra item, and hands it on. Picking the item sends the selected
- * text as onAsk and closes the toolbar, which clears the selection.
+ * A stretch of text (a reply, a message) selected as one: holding on any text in it selects a word
+ * there, and the handles then carry the selection across every text view inside, which Android's
+ * own selection can't do, as it stays within one view. The text inside isn't natively selectable;
+ * views tagged with the skip nativeID (labels, buttons) are left out.
+ *
+ * The touches go on to the content as usual; only once a hold turns into a selection does this take
+ * the rest of the gesture, which then drags out the selection.
  */
-class AskSelectionView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
-  private val onAsk by EventDispatcher<Map<String, String>>()
+class SelectionScopeView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
+  private val slop = ViewConfiguration.get(context).scaledTouchSlop
+  private var downX = 0f
+  private var downY = 0f
+  private var down: MotionEvent? = null
+  // Whether this gesture became a selection, so the rest of it drags the selection out.
+  private var selecting = false
 
-  override fun startActionModeForChild(originalView: View, callback: ActionMode.Callback, type: Int): ActionMode? {
-    val wrapped = if (originalView is TextView && originalView.isTextSelectable) AskCallback(callback, originalView) else callback
-    return super.startActionModeForChild(originalView, wrapped, type)
+  private val longPress = Runnable {
+    val event = down ?: return@Runnable
+    if (!Selector.begin(this, event.rawX, event.rawY)) return@Runnable
+    selecting = true
+    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+    // The content (links, buttons) and the list around stop following the finger.
+    val cancel = MotionEvent.obtain(event.downTime, SystemClock.uptimeMillis(), MotionEvent.ACTION_CANCEL, event.x, event.y, 0)
+    super.dispatchTouchEvent(cancel)
+    cancel.recycle()
+    parent?.requestDisallowInterceptTouchEvent(true)
+    NativeGestureUtil.notifyNativeGestureStarted(this, event)
   }
 
-  private inner class AskCallback(
-    private val inner: ActionMode.Callback,
-    private val textView: TextView,
-  ) : ActionMode.Callback2() {
-    private fun addItem(menu: Menu): Boolean {
-      if (menu.findItem(ASK_ID) != null) return false
-      // Always shown, as Copy is. Only "if room", it ranks behind the system's own items, and with
-      // Select all on the toolbar (anything short of all the text selected) it lands in the overflow.
-      menu.add(Menu.NONE, ASK_ID, ASK_ORDER, "Ask Clanker").setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+  /** Inside another scope, which selects for it. */
+  private val nested: Boolean
+    get() {
+      var p = parent
+      while (p != null) {
+        if (p is SelectionScopeView) return true
+        p = p.parent
+      }
+      return false
+    }
+
+  override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+    if (selecting) {
+      when (ev.actionMasked) {
+        MotionEvent.ACTION_MOVE -> Selector.extend(ev.rawX, ev.rawY)
+        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+          selecting = false
+          NativeGestureUtil.notifyNativeGestureEnded(this, ev)
+          Selector.endExtend()
+        }
+      }
       return true
     }
-
-    override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean =
-      inner.onCreateActionMode(mode, menu).also { if (it) addItem(menu) }
-
-    // The toolbar refreshes its items as the selection changes; keep ours among them.
-    override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean {
-      val changed = inner.onPrepareActionMode(mode, menu)
-      return addItem(menu) || changed
+    when (ev.actionMasked) {
+      MotionEvent.ACTION_DOWN -> {
+        down?.recycle()
+        down = MotionEvent.obtain(ev)
+        downX = ev.rawX
+        downY = ev.rawY
+        if (!nested && Selector.hits(this, ev.rawX, ev.rawY)) {
+          postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
+        }
+      }
+      MotionEvent.ACTION_MOVE -> if (hypot(ev.rawX - downX, ev.rawY - downY) > slop) removeCallbacks(longPress)
+      MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> removeCallbacks(longPress)
     }
+    return super.dispatchTouchEvent(ev)
+  }
 
-    override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
-      if (item.itemId != ASK_ID) return inner.onActionItemClicked(mode, item)
-      val start = minOf(textView.selectionStart, textView.selectionEnd)
-      val end = maxOf(textView.selectionStart, textView.selectionEnd)
-      // Inline views (math, images) sit in the text as object replacement characters.
-      val text = if (start in 0 until end) textView.text.subSequence(start, end).toString().replace("￼", "").trim() else ""
-      if (text.isNotEmpty()) onAsk(mapOf("text" to text))
-      mode.finish()
-      return true
-    }
-
-    override fun onDestroyActionMode(mode: ActionMode) = inner.onDestroyActionMode(mode)
-
-    // The floating toolbar positions itself over the selection through this.
-    override fun onGetContentRect(mode: ActionMode, view: View, outRect: Rect) {
-      if (inner is ActionMode.Callback2) inner.onGetContentRect(mode, view, outRect)
-      else super.onGetContentRect(mode, view, outRect)
-    }
+  override fun onDetachedFromWindow() {
+    super.onDetachedFromWindow()
+    removeCallbacks(longPress)
+    selecting = false
+    Selector.scopeDetached(this)
   }
 }
 
@@ -78,8 +93,26 @@ class ClankerSelectionModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("ClankerSelection")
 
-    View(AskSelectionView::class) {
-      Events("onAsk")
+    Events("onAsk")
+
+    OnCreate {
+      current = this@ClankerSelectionModule
+    }
+
+    OnDestroy {
+      if (current === this@ClankerSelectionModule) current = null
+      Selector.clear()
+    }
+
+    View(SelectionScopeView::class) {}
+  }
+
+  companion object {
+    /** Where "Ask Clanker" sends the selected text. */
+    internal var current: ClankerSelectionModule? = null
+
+    internal fun ask(text: String) {
+      current?.sendEvent("onAsk", mapOf("text" to text))
     }
   }
 }
